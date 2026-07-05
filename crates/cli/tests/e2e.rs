@@ -111,6 +111,55 @@ fn generate_benchmark_scenes_writes_deterministic_splat_files() {
     assert!(out.join("benchmark-scenes.json").exists());
 }
 
+#[test]
+fn process_default_export_root_writes_timestamped_child_and_keeps_stdout_json() {
+    let dir = tempdir().unwrap();
+    let home = dir.path().join("home");
+    let export_root = home.join("Downloads").join("augmented-gaussian");
+    fs::create_dir_all(&export_root).unwrap();
+    let input = dir.path().join("room.ply");
+    fs::write(&input, ply_bytes()).unwrap();
+    let config = dir.path().join("config.json");
+    fs::write(&config, basic_config()).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_augmented-gaussian-cli"))
+        .env("USERPROFILE", &home)
+        .env("HOME", &home)
+        .args([
+            "process",
+            input.to_str().unwrap(),
+            "--out",
+            "~/Downloads/augmented-gaussian",
+            "--config",
+            config.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let manifest: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(manifest["outputDir"].as_str().unwrap().contains("room_"));
+    let entries = fs::read_dir(&export_root)
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(entries.len(), 1);
+    let generated = entries[0].path();
+    assert!(
+        generated
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("room_")
+    );
+    assert!(generated.join("manifest.json").exists());
+}
+
 fn assert_processes(input: &Path, out: &Path, config: &Path, format: &str) {
     let output = Command::new(env!("CARGO_BIN_EXE_augmented-gaussian-cli"))
         .args([

@@ -1,10 +1,12 @@
 use anyhow::Context;
+use augmented_gaussian_core::output_dir::resolve_output_dir;
 use augmented_gaussian_core::{ProcessConfig, RecipeBundle, process_file};
 use clap::{Parser, Subcommand};
 use serde::Serialize;
 use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Parser)]
 #[command(name = "augmented-gaussian-cli")]
@@ -18,7 +20,10 @@ struct Args {
 enum Command {
     Process {
         input: PathBuf,
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "Output directory. Empty/default ~/Downloads/augmented-gaussian creates <input>_<timestamp> child."
+        )]
         out: PathBuf,
         #[arg(long)]
         config: Option<PathBuf>,
@@ -28,7 +33,10 @@ enum Command {
     Benchmark {
         #[arg(long)]
         input: PathBuf,
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "Output directory. Empty/default ~/Downloads/augmented-gaussian creates <input>_<timestamp> child."
+        )]
         out: PathBuf,
         #[arg(long, default_value_t = false)]
         compare_cpu_gpu: bool,
@@ -99,6 +107,12 @@ fn run_pipeline_with_config(
     recipe_path: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     let recipe = read_json_or_default::<RecipeBundle>(recipe_path)?;
+    let now_millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let out = resolve_output_dir(&input, &out, now_millis)?;
+    eprintln!("resolved output dir: {}", out.display());
     let output = process_file(&input, &out, &config, &recipe)
         .with_context(|| format!("failed to process {}", input.display()))?;
     println!("{}", serde_json::to_string_pretty(&output.manifest)?);

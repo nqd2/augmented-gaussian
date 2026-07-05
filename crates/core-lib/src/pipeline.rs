@@ -1,5 +1,8 @@
 use crate::alignment::{AlignmentTransform, bake_alignment};
-use crate::config::{EditOperation, ProcessConfig, RecipeBundle, VoxelBackend, VoxelCarveConfig};
+use crate::config::{
+    EditOperation, ProcessConfig, RecipeBundle, ReconstructionMethod, VoxelBackend,
+    VoxelCarveConfig,
+};
 use crate::error::{AgError, AgResult};
 use crate::evaluation::mesh_error_against_splat_centers;
 use crate::filters::{
@@ -10,21 +13,60 @@ use crate::glb::{write_mesh_glb, write_navmesh_bin};
 use crate::gpu::voxelize_gpu_blocking;
 use crate::manifest::{AlignmentManifest, ArtifactManifest, Manifest, Metrics, SourceStats};
 use crate::math::{Bounds, Vec3};
-use crate::mesh::{Mesh, extract_mesh};
+use crate::mesh::{Mesh, extract_mesh, validate_mesh};
 use crate::navmesh::bake_navmesh;
-use crate::readers::{read_source, write_sog_bundle};
+use crate::readers::{read_source, write_ply, write_sog_bundle};
 use crate::voxel::{VoxelParams, carve_grid_with_status, fill_grid_with_status, voxelize_cpu};
 use crate::webar::write_webar_zip;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
-use std::time::Instant;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessOutput {
     pub manifest: Manifest,
     pub collision_mesh: Mesh,
     pub navmesh: Option<Mesh>,
+}
+
+#[derive(Debug, Clone)]
+struct ReconstructionOutcome {
+    collision_mesh: Mesh,
+    table: crate::SplatTable,
+    reconstruction_method: String,
+    reconstruction_ms: u128,
+    reconstruction_adapter_status: Option<String>,
+    gpu_voxel_ms: Option<u128>,
+    cpu_gpu_voxel_mismatches: Option<usize>,
+    gpu_voxel_speedup: Option<f64>,
+    voxel_backend: String,
+    voxel_ms: u128,
+    cpu_voxel_ms: u128,
+    floater_filter_input_count: usize,
+    floater_filter_output_count: usize,
+    floater_filter_removed_count: usize,
+    fill_ms: u128,
+    carve_ms: u128,
+    mesh_ms: u128,
+    voxel_solid_cells: usize,
+    filled_solid_cells: usize,
+    carved_solid_cells: usize,
+    cropped_solid_cells: usize,
+    voxel_grid_dims: [usize; 3],
+    filled_grid_dims: [usize; 3],
+    carved_grid_dims: [usize; 3],
+    cropped_grid_dims: [usize; 3],
+    crop_min_cell: [usize; 3],
+    crop_max_cell: [usize; 3],
+    carve_reachable_cells: usize,
+    carve_requested_seed: [f32; 3],
+    carve_resolved_seed: Option<[f32; 3]>,
+    collision_warnings: Vec<String>,
 }
 
 pub fn process_file(
@@ -66,6 +108,7 @@ pub fn process_file_with_cancel_and_progress(
     let input_path = input_path.as_ref();
     let out_dir = out_dir.as_ref();
     fs::create_dir_all(out_dir)?;
+    harden_permissions(out_dir)?;
 
     progress("decode");
     let source_bytes = fs::metadata(input_path)
@@ -93,9 +136,6 @@ pub fn process_file_with_cancel_and_progress(
     let mut filter_cluster_seed_resolved = false;
     let mut filter_cluster_occupied_cells = 0usize;
     let mut filter_cluster_cells = 0usize;
-    let mut floater_filter_input_count = 0usize;
-    let mut floater_filter_output_count = 0usize;
-    let mut floater_filter_removed_count = 0usize;
     if let Some(edit_recipe) = &recipe.edit_recipe {
         for op in &edit_recipe.operations {
             match op {
@@ -147,104 +187,31 @@ pub fn process_file_with_cancel_and_progress(
     }
     check_cancelled(&should_cancel)?;
 
-    progress("voxelize");
-    let voxel_params = VoxelParams {
-        size: config.voxel.size,
-        opacity_threshold: config.voxel.opacity_threshold,
-    };
-    let start = Instant::now();
-    let mut cpu_grid = voxelize_cpu(&table, voxel_params)?;
-    if let Some(min_contribution) = recipe.edit_recipe.as_ref().and_then(|recipe| {
-        recipe.operations.iter().find_map(|op| {
-            if let EditOperation::FilterFloatersByVoxelContribution { min_contribution } = op {
-                Some(*min_contribution)
-            } else {
-                None
-            }
-        })
-    }) {
-        let outcome = filter_floaters_by_voxel_contribution_with_stats(
-            &table,
-            &cpu_grid,
-            voxel_params,
-            min_contribution,
-        )?;
-        floater_filter_input_count += outcome.input_count;
-        floater_filter_output_count = outcome.output_count;
-        floater_filter_removed_count += outcome.removed_count;
-        table = outcome.table;
-        cpu_grid = voxelize_cpu(&table, voxel_params)?;
-    }
-    let cpu_voxel_ms = start.elapsed().as_millis();
-    check_cancelled(&should_cancel)?;
-    let mut gpu_voxel_ms = None;
-    let mut cpu_gpu_voxel_mismatches = None;
-    let (grid, voxel_ms, voxel_backend) = match config.voxel.backend {
-        VoxelBackend::Cpu => {
-            if config.voxel.compare_cpu_gpu {
-                let start = Instant::now();
-                let gpu_grid = voxelize_gpu_blocking(&table, voxel_params, wgpu_ctx)?;
-                gpu_voxel_ms = Some(start.elapsed().as_millis());
-                cpu_gpu_voxel_mismatches = Some(cpu_grid.mismatch_count(&gpu_grid));
-                check_cancelled(&should_cancel)?;
-            }
-            (cpu_grid, cpu_voxel_ms, "cpu".to_string())
-        }
-        VoxelBackend::Gpu => {
-            let start = Instant::now();
-            let gpu_grid = voxelize_gpu_blocking(&table, voxel_params, wgpu_ctx)?;
-            let elapsed = start.elapsed().as_millis();
-            gpu_voxel_ms = Some(elapsed);
-            let mismatches = cpu_grid.mismatch_count(&gpu_grid);
-            if config.voxel.compare_cpu_gpu {
-                cpu_gpu_voxel_mismatches = Some(mismatches);
-            }
-            (gpu_grid, elapsed, "gpu".to_string())
+    let mut reconstruction = match config.reconstruction.method {
+        ReconstructionMethod::Voxel => reconstruct_with_voxel(
+            table,
+            config,
+            recipe,
+            aligned_carve_config,
+            collision_warnings,
+            &should_cancel,
+            &progress,
+            wgpu_ctx,
+        )?,
+        ReconstructionMethod::Sugar | ReconstructionMethod::Poisson => {
+            reconstruct_with_external_adapter(
+                table,
+                out_dir,
+                config,
+                collision_warnings,
+                &should_cancel,
+                &progress,
+            )?
         }
     };
-    check_cancelled(&should_cancel)?;
-
-    progress("fill");
-    let start = Instant::now();
-    let fill_outcome = fill_grid_with_status(
-        &grid,
-        &config.voxel_fill,
-        Vec3::from_array(aligned_carve_config.seed_pos),
-    );
-    let fill_ms = start.elapsed().as_millis();
-    if let Some(warning) = &fill_outcome.warning {
-        collision_warnings.push(warning.clone());
-    }
-    let filled_solid_cells = fill_outcome.after_solid;
-    let filled = fill_outcome.grid;
-    check_cancelled(&should_cancel)?;
-
-    progress("carve");
-    let start = Instant::now();
-    let carve_outcome = carve_grid_with_status(&filled, &aligned_carve_config);
-    let carve_ms = start.elapsed().as_millis();
-    if let Some(warning) = &carve_outcome.warning {
-        collision_warnings.push(warning.clone());
-    }
-    let carve_reachable_cells = carve_outcome.reachable_cells;
-    let carve_requested_seed = carve_outcome.requested_seed;
-    let carve_resolved_seed = carve_outcome.resolved_seed;
-    let carved_solid_cells = carve_outcome.after_solid;
-    let carved = carve_outcome.grid;
-    check_cancelled(&should_cancel)?;
-
-    progress("mesh");
-    let start = Instant::now();
-    let (collision_grid, crop_stats) = carved.crop_to_occupied();
-    let collision_mesh = extract_mesh(&collision_grid, config.mesh.mode)?;
-    let mesh_ms = start.elapsed().as_millis();
+    let collision_mesh = reconstruction.collision_mesh.clone();
+    let table = reconstruction.table;
     let triangle_count = collision_mesh.triangle_count();
-    if triangle_count == 0 {
-        collision_warnings.push(
-            "collision mesh generated 0 triangles; check voxel size, opacity threshold, bake profile, or carve/fill seed"
-                .to_string(),
-        );
-    }
     let geometric_error = mesh_error_against_splat_centers(&table, &collision_mesh);
     check_cancelled(&should_cancel)?;
 
@@ -263,7 +230,7 @@ pub fn process_file_with_cancel_and_progress(
     let navmesh_glb_path = out_dir.join("navmesh.glb");
     let navmesh_bin_path = out_dir.join("navmesh.bin");
     if config.navmesh.enabled && navmesh_triangle_count == 0 {
-        collision_warnings.push(
+        reconstruction.collision_warnings.push(
             "navmesh generated 0 triangles; likely causes are a blocked seed, empty carve result, wrong floor plane, or wrong up axis"
                 .to_string(),
         );
@@ -290,6 +257,8 @@ pub fn process_file_with_cancel_and_progress(
 
     let mut manifest = Manifest {
         version: 1,
+        schema_version: 2,
+        output_dir: out_dir.to_string_lossy().to_string(),
         source: SourceStats {
             format,
             splat_count: source_count,
@@ -321,20 +290,17 @@ pub fn process_file_with_cancel_and_progress(
                 .then(|| "webar.zip".to_string()),
         },
         metrics: Metrics {
+            reconstruction_method: reconstruction.reconstruction_method,
+            reconstruction_ms: reconstruction.reconstruction_ms,
+            reconstruction_adapter_status: reconstruction.reconstruction_adapter_status,
             decode_ms,
             alignment_ms,
-            voxel_ms,
-            cpu_voxel_ms,
-            gpu_voxel_ms,
-            gpu_voxel_speedup: gpu_voxel_ms.and_then(|gpu| {
-                if gpu == 0 {
-                    None
-                } else {
-                    Some(cpu_voxel_ms as f64 / gpu as f64)
-                }
-            }),
-            voxel_backend,
-            cpu_gpu_voxel_mismatches,
+            voxel_ms: reconstruction.voxel_ms,
+            cpu_voxel_ms: reconstruction.cpu_voxel_ms,
+            gpu_voxel_ms: reconstruction.gpu_voxel_ms,
+            gpu_voxel_speedup: reconstruction.gpu_voxel_speedup,
+            voxel_backend: reconstruction.voxel_backend,
+            cpu_gpu_voxel_mismatches: reconstruction.cpu_gpu_voxel_mismatches,
             filter_cluster_input_count,
             filter_cluster_output_count,
             filter_cluster_removed_count,
@@ -343,28 +309,28 @@ pub fn process_file_with_cancel_and_progress(
             filter_cluster_seed_resolved,
             filter_cluster_occupied_cells,
             filter_cluster_cells,
-            floater_filter_input_count,
-            floater_filter_output_count,
-            floater_filter_removed_count,
-            fill_ms,
-            carve_ms,
-            mesh_ms,
+            floater_filter_input_count: reconstruction.floater_filter_input_count,
+            floater_filter_output_count: reconstruction.floater_filter_output_count,
+            floater_filter_removed_count: reconstruction.floater_filter_removed_count,
+            fill_ms: reconstruction.fill_ms,
+            carve_ms: reconstruction.carve_ms,
+            mesh_ms: reconstruction.mesh_ms,
             navmesh_ms,
             export_ms: 0,
-            voxel_solid_cells: grid.solid_count(),
-            filled_solid_cells,
-            carved_solid_cells,
-            cropped_solid_cells: collision_grid.solid_count(),
-            voxel_grid_dims: grid.dims,
-            filled_grid_dims: filled.dims,
-            carved_grid_dims: carved.dims,
-            cropped_grid_dims: collision_grid.dims,
-            crop_min_cell: crop_stats.min_cell,
-            crop_max_cell: crop_stats.max_cell,
-            carve_reachable_cells,
-            carve_requested_seed,
-            carve_resolved_seed,
-            collision_warnings,
+            voxel_solid_cells: reconstruction.voxel_solid_cells,
+            filled_solid_cells: reconstruction.filled_solid_cells,
+            carved_solid_cells: reconstruction.carved_solid_cells,
+            cropped_solid_cells: reconstruction.cropped_solid_cells,
+            voxel_grid_dims: reconstruction.voxel_grid_dims,
+            filled_grid_dims: reconstruction.filled_grid_dims,
+            carved_grid_dims: reconstruction.carved_grid_dims,
+            cropped_grid_dims: reconstruction.cropped_grid_dims,
+            crop_min_cell: reconstruction.crop_min_cell,
+            crop_max_cell: reconstruction.crop_max_cell,
+            carve_reachable_cells: reconstruction.carve_reachable_cells,
+            carve_requested_seed: reconstruction.carve_requested_seed,
+            carve_resolved_seed: reconstruction.carve_resolved_seed,
+            collision_warnings: reconstruction.collision_warnings,
             source_bytes,
             scene_sog_bytes,
             optimized_glb_bytes,
@@ -439,6 +405,396 @@ pub fn process_file_with_cancel_and_progress(
         collision_mesh,
         navmesh,
     })
+}
+
+fn reconstruct_with_voxel(
+    mut table: crate::SplatTable,
+    config: &ProcessConfig,
+    recipe: &RecipeBundle,
+    aligned_carve_config: VoxelCarveConfig,
+    mut collision_warnings: Vec<String>,
+    should_cancel: &impl Fn() -> bool,
+    progress: &impl Fn(&str),
+    wgpu_ctx: Option<&crate::gpu::WgpuContext>,
+) -> AgResult<ReconstructionOutcome> {
+    let reconstruction_start = Instant::now();
+    progress("voxelize");
+    let voxel_params = VoxelParams {
+        size: config.voxel.size,
+        opacity_threshold: config.voxel.opacity_threshold,
+    };
+    let start = Instant::now();
+    let mut cpu_grid = voxelize_cpu(&table, voxel_params)?;
+    if let Some(min_contribution) = recipe.edit_recipe.as_ref().and_then(|recipe| {
+        recipe.operations.iter().find_map(|op| {
+            if let EditOperation::FilterFloatersByVoxelContribution { min_contribution } = op {
+                Some(*min_contribution)
+            } else {
+                None
+            }
+        })
+    }) {
+        let outcome = filter_floaters_by_voxel_contribution_with_stats(
+            &table,
+            &cpu_grid,
+            voxel_params,
+            min_contribution,
+        )?;
+        floater_filter_input_count += outcome.input_count;
+        floater_filter_output_count = outcome.output_count;
+        floater_filter_removed_count += outcome.removed_count;
+        table = outcome.table;
+        cpu_grid = voxelize_cpu(&table, voxel_params)?;
+    }
+    let cpu_voxel_ms = start.elapsed().as_millis();
+    check_cancelled(should_cancel)?;
+    let mut gpu_voxel_ms = None;
+    let mut cpu_gpu_voxel_mismatches = None;
+    let (grid, voxel_ms, voxel_backend) = match config.voxel.backend {
+        VoxelBackend::Cpu => {
+            if config.voxel.compare_cpu_gpu {
+                let start = Instant::now();
+                let gpu_grid = voxelize_gpu_blocking(&table, voxel_params, wgpu_ctx)?;
+                gpu_voxel_ms = Some(start.elapsed().as_millis());
+                cpu_gpu_voxel_mismatches = Some(cpu_grid.mismatch_count(&gpu_grid));
+                check_cancelled(should_cancel)?;
+            }
+            (cpu_grid, cpu_voxel_ms, "cpu".to_string())
+        }
+        VoxelBackend::Gpu => {
+            let start = Instant::now();
+            let gpu_grid = voxelize_gpu_blocking(&table, voxel_params, wgpu_ctx)?;
+            let elapsed = start.elapsed().as_millis();
+            gpu_voxel_ms = Some(elapsed);
+            let mismatches = cpu_grid.mismatch_count(&gpu_grid);
+            if config.voxel.compare_cpu_gpu {
+                cpu_gpu_voxel_mismatches = Some(mismatches);
+            }
+            (gpu_grid, elapsed, "gpu".to_string())
+        }
+    };
+    check_cancelled(should_cancel)?;
+
+    progress("fill");
+    let start = Instant::now();
+    let fill_outcome = fill_grid_with_status(
+        &grid,
+        &config.voxel_fill,
+        Vec3::from_array(aligned_carve_config.seed_pos),
+    );
+    let fill_ms = start.elapsed().as_millis();
+    if let Some(warning) = &fill_outcome.warning {
+        collision_warnings.push(warning.clone());
+    }
+    let filled_solid_cells = fill_outcome.after_solid;
+    let filled = fill_outcome.grid;
+    check_cancelled(should_cancel)?;
+
+    progress("carve");
+    let start = Instant::now();
+    let carve_outcome = carve_grid_with_status(&filled, &aligned_carve_config);
+    let carve_ms = start.elapsed().as_millis();
+    if let Some(warning) = &carve_outcome.warning {
+        collision_warnings.push(warning.clone());
+    }
+    let carve_reachable_cells = carve_outcome.reachable_cells;
+    let carve_requested_seed = carve_outcome.requested_seed;
+    let carve_resolved_seed = carve_outcome.resolved_seed;
+    let carved_solid_cells = carve_outcome.after_solid;
+    let carved = carve_outcome.grid;
+    check_cancelled(should_cancel)?;
+
+    progress("mesh");
+    let start = Instant::now();
+    let (collision_grid, crop_stats) = carved.crop_to_occupied();
+    let collision_mesh = extract_mesh(&collision_grid, config.mesh.mode)?;
+    let mesh_ms = start.elapsed().as_millis();
+    if collision_mesh.triangle_count() == 0 {
+        collision_warnings.push(
+            "collision mesh generated 0 triangles; check voxel size, opacity threshold, bake profile, or carve/fill seed"
+                .to_string(),
+        );
+    }
+
+    Ok(ReconstructionOutcome {
+        collision_mesh,
+        table,
+        reconstruction_method: ReconstructionMethod::Voxel.as_str().to_string(),
+        reconstruction_ms: reconstruction_start.elapsed().as_millis(),
+        reconstruction_adapter_status: None,
+        gpu_voxel_ms,
+        cpu_gpu_voxel_mismatches,
+        gpu_voxel_speedup: gpu_voxel_ms.and_then(|gpu| {
+            if gpu == 0 {
+                None
+            } else {
+                Some(cpu_voxel_ms as f64 / gpu as f64)
+            }
+        }),
+        voxel_backend,
+        voxel_ms,
+        cpu_voxel_ms,
+        floater_filter_input_count,
+        floater_filter_output_count,
+        floater_filter_removed_count,
+        fill_ms,
+        carve_ms,
+        mesh_ms,
+        voxel_solid_cells: grid.solid_count(),
+        filled_solid_cells,
+        carved_solid_cells,
+        cropped_solid_cells: collision_grid.solid_count(),
+        voxel_grid_dims: grid.dims,
+        filled_grid_dims: filled.dims,
+        carved_grid_dims: carved.dims,
+        cropped_grid_dims: collision_grid.dims,
+        crop_min_cell: crop_stats.min_cell,
+        crop_max_cell: crop_stats.max_cell,
+        carve_reachable_cells,
+        carve_requested_seed,
+        carve_resolved_seed,
+        collision_warnings,
+    })
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AdapterRequest {
+    input_ply: String,
+    out_dir: String,
+    method: String,
+    target_triangles: u32,
+    timeout_seconds: u32,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AdapterResponse {
+    mesh_json: PathBuf,
+    #[serde(default)]
+    warnings: Vec<String>,
+}
+
+fn reconstruct_with_external_adapter(
+    table: crate::SplatTable,
+    out_dir: &Path,
+    config: &ProcessConfig,
+    mut collision_warnings: Vec<String>,
+    should_cancel: &impl Fn() -> bool,
+    progress: &impl Fn(&str),
+) -> AgResult<ReconstructionOutcome> {
+    progress("reconstruct");
+    let reconstruction_start = Instant::now();
+    let adapter_command = config
+        .reconstruction
+        .adapter_command
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            AgError::InvalidConfig(
+                "adapterCommand is required when reconstruction method is not voxel".to_string(),
+            )
+        })?;
+    let adapter_dir = out_dir.join("adapter-work");
+    fs::create_dir_all(&adapter_dir)?;
+    harden_permissions(&adapter_dir)?;
+    let input_ply = adapter_dir.join("filtered-input.ply");
+    write_ply(&input_ply, &table)?;
+    let request = AdapterRequest {
+        input_ply: input_ply.to_string_lossy().to_string(),
+        out_dir: out_dir.to_string_lossy().to_string(),
+        method: config.reconstruction.method.as_str().to_string(),
+        target_triangles: config.reconstruction.target_triangles,
+        timeout_seconds: config.reconstruction.timeout_seconds,
+    };
+    let stdout = run_adapter(
+        adapter_command,
+        &adapter_dir,
+        &serde_json::to_vec(&request)?,
+        Duration::from_secs(config.reconstruction.timeout_seconds as u64),
+        should_cancel,
+    )?;
+    let response: AdapterResponse = serde_json::from_slice(stdout.as_bytes())?;
+    collision_warnings.extend(response.warnings);
+    let mesh_path = resolve_adapter_mesh_path(out_dir, &response.mesh_json)?;
+    harden_permissions(&mesh_path)?;
+    let collision_mesh: Mesh = serde_json::from_slice(&fs::read(&mesh_path)?)?;
+    validate_mesh(&collision_mesh)?;
+    warn_if_mesh_exceeds_target(&collision_mesh, config, &mut collision_warnings);
+
+    Ok(ReconstructionOutcome {
+        collision_mesh,
+        table,
+        reconstruction_method: config.reconstruction.method.as_str().to_string(),
+        reconstruction_ms: reconstruction_start.elapsed().as_millis(),
+        reconstruction_adapter_status: Some("ok".to_string()),
+        gpu_voxel_ms: None,
+        cpu_gpu_voxel_mismatches: None,
+        gpu_voxel_speedup: None,
+        voxel_backend: "external".to_string(),
+        voxel_ms: 0,
+        cpu_voxel_ms: 0,
+        floater_filter_input_count: 0,
+        floater_filter_output_count: 0,
+        floater_filter_removed_count: 0,
+        fill_ms: 0,
+        carve_ms: 0,
+        mesh_ms: 0,
+        voxel_solid_cells: 0,
+        filled_solid_cells: 0,
+        carved_solid_cells: 0,
+        cropped_solid_cells: 0,
+        voxel_grid_dims: [0, 0, 0],
+        filled_grid_dims: [0, 0, 0],
+        carved_grid_dims: [0, 0, 0],
+        cropped_grid_dims: [0, 0, 0],
+        crop_min_cell: [0, 0, 0],
+        crop_max_cell: [0, 0, 0],
+        carve_reachable_cells: 0,
+        carve_requested_seed: config.voxel_carve.seed_pos,
+        carve_resolved_seed: None,
+        collision_warnings,
+    })
+}
+
+fn run_adapter(
+    adapter_command: &str,
+    working_dir: &Path,
+    stdin_json: &[u8],
+    timeout: Duration,
+    should_cancel: &impl Fn() -> bool,
+) -> AgResult<String> {
+    let parts = split_command(adapter_command)?;
+    let program = parts
+        .first()
+        .ok_or_else(|| AgError::InvalidConfig("adapterCommand must not be empty".to_string()))?;
+    let mut child = Command::new(program)
+        .args(&parts[1..])
+        .current_dir(working_dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| {
+            AgError::InvalidConfig(format!("failed to start reconstruction adapter: {err}"))
+        })?;
+    child.stdin.take().unwrap().write_all(stdin_json)?;
+    let stdout = Arc::new(Mutex::new(String::new()));
+    let stderr = Arc::new(Mutex::new(String::new()));
+    let out_reader = spawn_reader(child.stdout.take(), stdout.clone());
+    let err_reader = spawn_reader(child.stderr.take(), stderr.clone());
+    let start = Instant::now();
+    loop {
+        check_cancelled(should_cancel)?;
+        if let Some(status) = child.try_wait()? {
+            out_reader.join().ok();
+            err_reader.join().ok();
+            let out = stdout.lock().unwrap().clone();
+            let err = stderr.lock().unwrap().clone();
+            if !status.success() {
+                return Err(AgError::InvalidInput(format!(
+                    "reconstruction adapter exited with {status}: {}",
+                    err.trim()
+                )));
+            }
+            return Ok(out);
+        }
+        if start.elapsed() > timeout {
+            let _ = child.kill();
+            return Err(AgError::InvalidInput(
+                "reconstruction adapter timed out".to_string(),
+            ));
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn spawn_reader<R: Read + Send + 'static>(
+    reader: Option<R>,
+    output: Arc<Mutex<String>>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        if let Some(mut reader) = reader {
+            let mut text = String::new();
+            let _ = reader.read_to_string(&mut text);
+            *output.lock().unwrap() = text;
+        }
+    })
+}
+
+fn resolve_adapter_mesh_path(out_dir: &Path, mesh_path: &Path) -> AgResult<PathBuf> {
+    let candidate = if mesh_path.is_absolute() {
+        mesh_path.to_path_buf()
+    } else {
+        out_dir.join(mesh_path)
+    };
+    let out_root = fs::canonicalize(out_dir)?;
+    let canonical = fs::canonicalize(&candidate)?;
+    if !canonical.starts_with(&out_root) {
+        return Err(AgError::InvalidInput(
+            "adapter mesh output must stay inside resolved outDir".to_string(),
+        ));
+    }
+    Ok(canonical)
+}
+
+fn warn_if_mesh_exceeds_target(
+    mesh: &Mesh,
+    config: &ProcessConfig,
+    collision_warnings: &mut Vec<String>,
+) {
+    let ideal_limit = (config.reconstruction.target_triangles as f32 * 1.2).ceil() as usize;
+    if mesh.triangle_count() > ideal_limit {
+        collision_warnings.push(format!(
+            "reconstruction adapter mesh has {} triangles, above targetTriangles * 1.2 ({ideal_limit})",
+            mesh.triangle_count()
+        ));
+    }
+}
+
+fn split_command(command: &str) -> AgResult<Vec<String>> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    for ch in command.chars() {
+        match ch {
+            '"' => in_quotes = !in_quotes,
+            ' ' | '\t' if !in_quotes => {
+                if !current.is_empty() {
+                    parts.push(std::mem::take(&mut current));
+                }
+            }
+            _ => current.push(ch),
+        }
+    }
+    if in_quotes {
+        return Err(AgError::InvalidConfig(
+            "adapterCommand contains an unterminated quote".to_string(),
+        ));
+    }
+    if !current.is_empty() {
+        parts.push(current);
+    }
+    Ok(parts)
+}
+
+#[cfg(unix)]
+fn harden_permissions(path: &Path) -> AgResult<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let metadata = fs::metadata(path)?;
+    let mut permissions = metadata.permissions();
+    let mode = permissions.mode();
+    if mode & 0o002 != 0 {
+        let target = if metadata.is_dir() { 0o755 } else { 0o644 };
+        permissions.set_mode(target);
+        fs::set_permissions(path, permissions)?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn harden_permissions(_path: &Path) -> AgResult<()> {
+    Ok(())
 }
 
 fn check_cancelled(should_cancel: &impl Fn() -> bool) -> AgResult<()> {

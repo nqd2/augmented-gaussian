@@ -1,10 +1,12 @@
 use crate::commands::AppState;
 use crate::paths::expand_user_path;
+use augmented_gaussian_core::output_dir::resolve_output_dir;
 use augmented_gaussian_core::pipeline::process_file_with_cancel_and_progress;
 use augmented_gaussian_core::{Manifest, ProcessConfig, RecipeBundle};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Emitter;
 
 pub static CANCEL_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -48,6 +50,12 @@ pub async fn process_job(
     let source_context = request.source_context;
     let input_path = expand_user_path(request.input_path)?;
     let out_dir = expand_user_path(request.out_dir)?;
+    let now_millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|err| err.to_string())?
+        .as_millis();
+    let out_dir =
+        resolve_output_dir(&input_path, &out_dir, now_millis).map_err(|err| err.to_string())?;
     let app_for_job = app.clone();
     let wgpu_ctx = state.wgpu_ctx.clone();
     let output = tauri::async_runtime::spawn_blocking(move || {

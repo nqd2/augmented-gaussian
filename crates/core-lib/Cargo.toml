@@ -4,6 +4,11 @@ edition.workspace = true
 license.workspace = true
 version.workspace = true
 
+[[bin]]
+name = "fake_mesh_adapter"
+path = "../../tests/adapters/fake_mesh.rs"
+test = false
+
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true

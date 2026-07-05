@@ -8,7 +8,7 @@ import { E2eSelector } from './E2eSelector';
 import { PointEditor } from './PointEditor';
 import { SceneTransformControls } from '../domains/editor/SceneTransformControls';
 import { type SceneTransform } from '../domains/editor/sceneTransform';
-import { type GeometryProfile, type Point3, type PickMode, type UpAxis } from '../domains/calibration';
+import { type GeometryProfile, type Point3, type PickMode, type ReconstructionMethod, type UpAxis } from '../domains/calibration';
 
 export function ConfigPanel({
   inputPath,
@@ -25,6 +25,11 @@ export function ConfigPanel({
   setUpAxis,
   geometryProfile,
   setGeometryProfile,
+  reconstructionMethod,
+  setReconstructionMethod,
+  adapterCommand,
+  setAdapterCommand,
+  hasValidReconstructionAdapter,
   sceneTransform,
   setSceneTransformAxis,
   resetSceneTransform,
@@ -47,6 +52,11 @@ export function ConfigPanel({
   setUpAxis: (val: UpAxis) => void;
   geometryProfile: GeometryProfile;
   setGeometryProfile: (val: GeometryProfile) => void;
+  reconstructionMethod: ReconstructionMethod;
+  setReconstructionMethod: (val: ReconstructionMethod) => void;
+  adapterCommand: string;
+  setAdapterCommand: (val: string) => void;
+  hasValidReconstructionAdapter: boolean;
   sceneTransform: SceneTransform;
   setSceneTransformAxis: (key: keyof SceneTransform, index: number, value: number) => void;
   resetSceneTransform: () => void;
@@ -83,7 +93,7 @@ export function ConfigPanel({
                   label="Output Directory"
                   value={outDir}
                   onChange={(val: string) => setOutDir(val)}
-                  status={outDir ? { type: 'success' } : undefined}
+                  status={outDir ? { type: 'success', message: isDefaultExportRoot(outDir) ? '(tự động tạo sub-folder theo tên file)' : undefined } : undefined}
                 />
                 <Button
                   label="Browse"
@@ -142,6 +152,25 @@ export function ConfigPanel({
                 status={{ type: 'success' }}
               />
               <E2eSelector
+                label="Reconstruction Method"
+                astryxLabel="Reconstruction Method"
+                options={[
+                  { value: 'voxel', label: 'Voxel volume' },
+                  { value: 'sugar', label: 'SuGaR surface' },
+                  { value: 'poisson', label: 'Poisson point cloud' },
+                ]}
+                value={reconstructionMethod}
+                onChange={(val: string) => setReconstructionMethod(val as ReconstructionMethod)}
+                status={hasValidReconstructionAdapter ? { type: 'success' } : { type: 'error', message: 'External reconstruction adapter command required.' }}
+              />
+              <TextInput
+                label="Adapter Command"
+                value={adapterCommand}
+                onChange={(val: string) => setAdapterCommand(val)}
+                placeholder="python adapters/poisson.py"
+                status={hasValidReconstructionAdapter ? undefined : { type: 'error', message: 'External reconstruction adapter command required.' }}
+              />
+              <E2eSelector
                 label="Bake Profile"
                 astryxLabel="Collision Pipeline"
                 options={[
@@ -169,4 +198,9 @@ export function ConfigPanel({
       </Card>
     </aside>
   );
+}
+
+function isDefaultExportRoot(path: string): boolean {
+  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
+  return normalized === '~/Downloads/augmented-gaussian' || /\/Downloads\/augmented-gaussian$/i.test(normalized);
 }

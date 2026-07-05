@@ -195,7 +195,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "augmented-gaussian-gui"
+name = "augmented-gaussian-desktop"
 version = "0.1.0"
 dependencies = [
  "augmented-gaussian-core",

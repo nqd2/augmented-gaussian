@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  adapterCommandStorageKey,
   defaultScalePoints,
   geometryProfileStorageKey,
   geometryProfileStorageVersion,
   geometryProfileStorageVersionKey,
   makeAlignmentRecipe,
   makeProcessConfig,
+  normalizeReconstructionMethod,
+  reconstructionMethodStorageKey,
+  requiresAdapterCommand,
   storedGeometryProfileOrDefault,
   type GeometryProfile,
   type Point3,
+  type ReconstructionMethod,
   type UpAxis,
   type PickMode,
 } from '../domains/calibration';
@@ -34,6 +39,14 @@ export function useCalibration() {
       readStoredJson(geometryProfileStorageKey),
       readStoredJson(geometryProfileStorageVersionKey),
     ));
+  const [reconstructionMethod, setReconstructionMethod] = useLocalStorage<ReconstructionMethod>(
+    reconstructionMethodStorageKey,
+    normalizeReconstructionMethod(readStoredJson(reconstructionMethodStorageKey)),
+  );
+  const [adapterCommand, setAdapterCommand] = useLocalStorage<string>(
+    adapterCommandStorageKey,
+    '',
+  );
   const [pickMode, setPickMode] = useLocalStorage<PickMode>('ag_calib_pick_mode', 'scale0');
 
   const [userPickedScalePoints, setUserPickedScalePoints] =
@@ -57,8 +70,19 @@ export function useCalibration() {
     [distance, geometryProfile, scalePoints, upAxis],
   );
   const processConfig = useMemo(
-    () => makeProcessConfig(scalePoints, distance, geometryProfile, upAxis),
-    [distance, geometryProfile, scalePoints, upAxis],
+    () => makeProcessConfig(
+      scalePoints,
+      distance,
+      geometryProfile,
+      upAxis,
+      reconstructionMethod,
+      adapterCommand,
+    ),
+    [adapterCommand, distance, geometryProfile, reconstructionMethod, scalePoints, upAxis],
+  );
+  const hasValidReconstructionAdapter = useMemo(
+    () => !requiresAdapterCommand(reconstructionMethod) || adapterCommand.trim().length > 0,
+    [adapterCommand, reconstructionMethod],
   );
 
   const isFloorCalibrated = true; // Automatically considered valid since it's derived from upAxis
@@ -99,6 +123,11 @@ export function useCalibration() {
     setUpAxis,
     geometryProfile,
     setGeometryProfile,
+    reconstructionMethod,
+    setReconstructionMethod,
+    adapterCommand,
+    setAdapterCommand,
+    hasValidReconstructionAdapter,
     pickMode,
     setPickMode,
     userPickedScalePoints,

@@ -3,6 +3,7 @@ pub mod error;
 pub mod evaluation;
 pub mod gpu;
 pub mod math;
+pub mod output_dir;
 pub mod pipeline;
 pub mod splat_table;
 

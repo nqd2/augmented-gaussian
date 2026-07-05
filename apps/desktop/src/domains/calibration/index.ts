@@ -4,22 +4,37 @@ export type Point3 = [number, number, number];
 export type UpAxis = 'x' | 'y' | 'z' | 'neg-x' | 'neg-y' | 'neg-z';
 export type PickMode = 'scale0' | 'scale1';
 export type GeometryProfile = 'object-prop' | 'interior-room' | 'outdoor-terrain';
+export type ReconstructionMethod = 'voxel' | 'sugar' | 'poisson';
 
 export const defaultGeometryProfile: GeometryProfile = 'object-prop';
+export const defaultReconstructionMethod: ReconstructionMethod = 'voxel';
 export const geometryProfileStorageKey = 'ag_bake_geometry_profile';
 export const geometryProfileStorageVersionKey = 'ag_bake_geometry_profile_version';
-export const geometryProfileStorageVersion = 2;
+export const geometryProfileStorageVersion = 3;
+export const reconstructionMethodStorageKey = 'ag_bake_reconstruction_method';
+export const adapterCommandStorageKey = 'ag_bake_adapter_command';
 
 const geometryProfiles = new Set<GeometryProfile>([
   'object-prop',
   'interior-room',
   'outdoor-terrain',
 ]);
+const reconstructionMethods = new Set<ReconstructionMethod>(['voxel', 'sugar', 'poisson']);
 
 export function normalizeGeometryProfile(value: unknown): GeometryProfile {
   return typeof value === 'string' && geometryProfiles.has(value as GeometryProfile)
     ? value as GeometryProfile
     : defaultGeometryProfile;
+}
+
+export function normalizeReconstructionMethod(value: unknown): ReconstructionMethod {
+  return typeof value === 'string' && reconstructionMethods.has(value as ReconstructionMethod)
+    ? value as ReconstructionMethod
+    : defaultReconstructionMethod;
+}
+
+export function requiresAdapterCommand(method: ReconstructionMethod): boolean {
+  return method === 'sugar' || method === 'poisson';
 }
 
 export function storedGeometryProfileOrDefault(
@@ -58,6 +73,8 @@ export function makeProcessConfig(
   distance: number,
   profile: GeometryProfile = defaultGeometryProfile,
   upAxis: UpAxis = 'y',
+  reconstructionMethod: ReconstructionMethod = defaultReconstructionMethod,
+  adapterCommand = '',
 ) {
   const upVec = upAxisVector(upAxis);
   const midX = (scalePoints[0][0] + scalePoints[1][0]) / 2;
@@ -75,8 +92,11 @@ export function makeProcessConfig(
     midZ + upVec[2] * unitScale,
   ];
 
+  const reconstruction = makeReconstructionConfig(reconstructionMethod, adapterCommand);
+
   if (profile === 'outdoor-terrain') {
     return {
+      reconstruction,
       voxel: { backend: 'cpu', size: 0.05, opacityThreshold: 0.1 },
       voxelFill: { mode: 'floor-fill', dilationSize: 0 },
       voxelCarve: { enabled: false, agentHeight: 1.6, agentRadius: 0.2, seedPos },
@@ -86,6 +106,7 @@ export function makeProcessConfig(
   }
   if (profile === 'interior-room') {
     return {
+      reconstruction,
       voxel: { backend: 'cpu', size: 0.05, opacityThreshold: 0.1 },
       voxelFill: { mode: 'exterior-fill', dilationSize: 1.6 },
       voxelCarve: { enabled: true, agentHeight: 1.6, agentRadius: 0.2, seedPos },
@@ -94,11 +115,21 @@ export function makeProcessConfig(
     };
   }
   return {
+    reconstruction,
     voxel: { backend: 'cpu', size: 0.05, opacityThreshold: 0.1 },
     voxelFill: { mode: 'none', dilationSize: 0 },
     voxelCarve: { enabled: false, agentHeight: 1.6, agentRadius: 0.2, seedPos },
     navmesh: { ...defaultNavmeshConfig, enabled: false },
     mesh: { mode: 'smooth' },
+  };
+}
+
+function makeReconstructionConfig(method: ReconstructionMethod, adapterCommand: string) {
+  return {
+    method,
+    adapterCommand: requiresAdapterCommand(method) ? adapterCommand.trim() || undefined : undefined,
+    targetTriangles: 50000,
+    timeoutSeconds: 900,
   };
 }
 

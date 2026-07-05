@@ -6,6 +6,8 @@ import {
   makeAlignmentRecipe,
   makeEditRecipe,
   makeProcessConfig,
+  normalizeReconstructionMethod,
+  requiresAdapterCommand,
   storedGeometryProfileOrDefault,
 } from './index';
 
@@ -18,6 +20,12 @@ describe('calibration profile defaults', () => {
     expect(config.voxel).toEqual({ backend: 'cpu', size: 0.05, opacityThreshold: 0.1 });
     expect(config.voxelFill).toEqual({ mode: 'none', dilationSize: 0 });
     expect(config.voxelCarve.enabled).toBe(false);
+    expect(config.reconstruction).toEqual({
+      method: 'voxel',
+      adapterCommand: undefined,
+      targetTriangles: 50000,
+      timeoutSeconds: 900,
+    });
     expect(config.navmesh.enabled).toBe(false);
     expect(config.navmesh).toMatchObject({
       agentHeight: 1.6,
@@ -57,5 +65,25 @@ describe('calibration profile defaults', () => {
       .toBe('interior-room');
     expect(storedGeometryProfileOrDefault('bad-profile', geometryProfileStorageVersion))
       .toBe('object-prop');
+  });
+
+  it('normalizes and validates reconstruction methods', () => {
+    expect(normalizeReconstructionMethod('sugar')).toBe('sugar');
+    expect(normalizeReconstructionMethod('poisson')).toBe('poisson');
+    expect(normalizeReconstructionMethod('bad')).toBe('voxel');
+    expect(requiresAdapterCommand('voxel')).toBe(false);
+    expect(requiresAdapterCommand('sugar')).toBe(true);
+    expect(requiresAdapterCommand('poisson')).toBe(true);
+  });
+
+  it('adds adapter command for external reconstruction configs', () => {
+    const config = makeProcessConfig(defaultScalePoints, 2, 'object-prop', 'y', 'sugar', 'run-sugar');
+
+    expect(config.reconstruction).toEqual({
+      method: 'sugar',
+      adapterCommand: 'run-sugar',
+      targetTriangles: 50000,
+      timeoutSeconds: 900,
+    });
   });
 });

@@ -76,7 +76,7 @@ export function useBakeJob({
       };
       const output = await invoke<Manifest>('process_job', { request });
       setManifest(output);
-      setArtifactOutDir(outDir);
+      setArtifactOutDir(output.outputDir ?? outDir);
       setStatus('done');
     } catch (err) {
       setStatus(`error: ${err instanceof Error ? err.message : String(err)}`);

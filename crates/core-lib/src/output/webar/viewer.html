@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>augmented-gaussian WebAR bundle</title>
+  <script type="module" src="https://unpkg.com/@google/model-viewer@3.4.0/dist/model-viewer.min.js"></script>
   <style>
     html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#080c0a;color:#e8f1eb;font:13px ui-monospace,Menlo,Consolas,monospace}
     #viewport{position:fixed;inset:0;width:100%;height:100%;display:block}
@@ -16,6 +17,10 @@
     ul{margin:8px 0 0;padding-left:18px;max-height:160px;overflow:auto}
     li{margin:4px 0}
     #fallback{display:none;position:fixed;inset:0;place-items:center;padding:24px;text-align:center}
+    #ar-panel{position:fixed;right:16px;bottom:16px;width:min(320px,calc(100vw - 32px));background:rgba(8,12,10,.82);border:1px solid #254437;padding:10px}
+    #ar-panel label{display:block;margin:0 0 6px;color:#8ce0bc}
+    #reconstruction-method{width:100%;margin:0 0 8px;background:#102019;color:#e8f1eb;border:1px solid #3e6b58;padding:6px;font:inherit}
+    model-viewer{width:100%;height:180px;background:#0b100d}
   </style>
 </head>
 <body>
@@ -31,12 +36,23 @@
       </div>
       <ul id="assets"></ul>
   </section>
+  <section id="ar-panel">
+    <label for="reconstruction-method">Reconstruction Method</label>
+    <select id="reconstruction-method">
+      <option value="voxel">Voxel</option>
+      <option value="sugar">SuGaR</option>
+      <option value="poisson">Poisson</option>
+    </select>
+    <model-viewer id="ar-viewer" ar ar-modes="webxr scene-viewer quick-look" camera-controls alt="AR occlusion mesh preview"></model-viewer>
+  </section>
   <script src="assets/js/playcanvas.min.js"></script>
   <script>
     const canvas = document.getElementById('viewport');
     const fallback = document.getElementById('fallback');
     const statusEl = document.getElementById('status');
     const assetsEl = document.getElementById('assets');
+    const arViewer = document.getElementById('ar-viewer');
+    const reconstructionSelect = document.getElementById('reconstruction-method');
 
     async function checkAsset(name) {
       const response = await fetch(name);
@@ -161,6 +177,13 @@
       const manifestResponse = await fetch('manifest.json');
       if (!manifestResponse.ok) throw new Error(`manifest.json: HTTP ${manifestResponse.status}`);
       const manifest = await manifestResponse.json();
+      const selectedMethod = manifest.metrics?.reconstructionMethod || 'voxel';
+      reconstructionSelect.value = ['voxel', 'sugar', 'poisson'].includes(selectedMethod) ? selectedMethod : 'voxel';
+      const occlusionUrl = manifest.artifacts.occlusionGlb;
+      arViewer.src = occlusionUrl;
+      reconstructionSelect.onchange = () => {
+        arViewer.src = occlusionUrl;
+      };
       const names = [
         manifest.artifacts.scene,
         manifest.artifacts.collisionMeshJson,

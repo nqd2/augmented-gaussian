@@ -3,6 +3,21 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { serveDirectory } from './server';
 
+function nodeModuleBin(...segments: string[]) {
+  return path.join(process.cwd(), 'node_modules', ...segments);
+}
+
+function buildApp() {
+  execFileSync(process.execPath, [nodeModuleBin('typescript', 'bin', 'tsc')], {
+    cwd: process.cwd(),
+    stdio: 'pipe',
+  });
+  execFileSync(process.execPath, [nodeModuleBin('vite', 'bin', 'vite.js'), 'build'], {
+    cwd: process.cwd(),
+    stdio: 'pipe',
+  });
+}
+
 async function routeMinimalSplat(page: import('@playwright/test').Page, repoRoot: string) {
   await page.route('**/tests/fixtures/minimal.splat', async (route) => {
     await route.fulfill({
@@ -19,7 +34,7 @@ async function pickTarget(page: import('@playwright/test').Page, target: string,
 
 test('GUI calibration flow serializes recipe and calls Tauri commands', async ({ page }) => {
   const repoRoot = path.resolve(process.cwd(), '../..');
-  execFileSync('pnpm', ['run', 'build'], { cwd: process.cwd(), stdio: 'pipe' });
+  buildApp();
 
   const calls: Array<{ cmd: string; args: unknown }> = [];
   await page.addInitScript(() => {
@@ -65,7 +80,7 @@ test('GUI calibration flow serializes recipe and calls Tauri commands', async ({
   });
   await routeMinimalSplat(page, repoRoot);
 
-  const { server, url } = await serveDirectory(path.join(repoRoot, 'apps/gui/dist'));
+  const { server, url } = await serveDirectory(path.join(repoRoot, 'apps/desktop/dist'));
   try {
     await page.goto(`${url}/index.html`);
     await page.getByLabel('Source PLY/SPLAT Path').fill('tests/fixtures/minimal.splat');
@@ -80,6 +95,12 @@ test('GUI calibration flow serializes recipe and calls Tauri commands', async ({
     await page.getByLabel('Scale endpoints 1 x').fill('0.1');
     await page.getByLabel('Scale endpoints 2 x').fill('4');
     await page.getByLabel('Up Axis').selectOption('z');
+    await page.locator('#e2e-select-reconstruction-method').selectOption('sugar');
+    await expect(page.getByRole('button', { name: 'Bake Geometry' })).toBeDisabled();
+    await expect(page.getByText('External reconstruction adapter command required.').first()).toBeVisible();
+    await page.getByLabel('Adapter Command').fill('run-sugar');
+    await expect(page.getByRole('button', { name: 'Bake Geometry' })).toBeEnabled();
+    await page.locator('#e2e-select-reconstruction-method').selectOption('voxel');
     await page.getByRole('button', { name: 'Bake Geometry' }).click();
     await expect(page.getByText('done', { exact: true }).first()).toBeVisible();
     await expect(page.getByRole('cell', { name: '12' })).toBeVisible();
@@ -109,6 +130,11 @@ test('GUI calibration flow serializes recipe and calls Tauri commands', async ({
   expect(config.voxel.size).toBe(0.05);
   expect(config.voxelFill.mode).toBe('none');
   expect(config.voxelCarve.enabled).toBe(false);
+  expect(config.reconstruction).toMatchObject({
+    method: 'voxel',
+    targetTriangles: 50000,
+    timeoutSeconds: 900,
+  });
   expect(config.navmesh.enabled).toBe(false);
   expect(config.mesh.mode).toBe('smooth');
   expect(request.inputPath).toBe('target/gui-e2e-output/edited-source.ply');
@@ -136,7 +162,7 @@ test('GUI calibration flow serializes recipe and calls Tauri commands', async ({
 
 test('progress events keep job controls locked while cancel stays available', async ({ page }) => {
   const repoRoot = path.resolve(process.cwd(), '../..');
-  execFileSync('pnpm', ['run', 'build'], { cwd: process.cwd(), stdio: 'pipe' });
+  buildApp();
 
   await page.addInitScript(() => {
     (window as any).__AG_CALLBACKS__ = [];
@@ -182,7 +208,7 @@ test('progress events keep job controls locked while cancel stays available', as
   });
   await routeMinimalSplat(page, repoRoot);
 
-  const { server, url } = await serveDirectory(path.join(repoRoot, 'apps/gui/dist'));
+  const { server, url } = await serveDirectory(path.join(repoRoot, 'apps/desktop/dist'));
   try {
     await page.goto(`${url}/index.html`);
     await page.waitForFunction(() => (window as any).__AG_CALLBACKS__.length > 0);
@@ -223,7 +249,7 @@ test('progress events keep job controls locked while cancel stays available', as
 
 test('up axis mode serializes alignment without floor point recipes', async ({ page }) => {
   const repoRoot = path.resolve(process.cwd(), '../..');
-  execFileSync('pnpm', ['run', 'build'], { cwd: process.cwd(), stdio: 'pipe' });
+  buildApp();
 
   await page.addInitScript(() => {
     (window as any).__AG_PROCESS_REQUEST__ = null;
@@ -261,7 +287,7 @@ test('up axis mode serializes alignment without floor point recipes', async ({ p
   });
   await routeMinimalSplat(page, repoRoot);
 
-  const { server, url } = await serveDirectory(path.join(repoRoot, 'apps/gui/dist'));
+  const { server, url } = await serveDirectory(path.join(repoRoot, 'apps/desktop/dist'));
   try {
     await page.goto(`${url}/index.html`);
     await page.getByLabel('Source PLY/SPLAT Path').fill('tests/fixtures/minimal.splat');
@@ -289,7 +315,7 @@ test('up axis mode serializes alignment without floor point recipes', async ({ p
 
 test('source loading keeps controls responsive and can be cancelled', async ({ page }) => {
   const repoRoot = path.resolve(process.cwd(), '../..');
-  execFileSync('pnpm', ['run', 'build'], { cwd: process.cwd(), stdio: 'pipe' });
+  buildApp();
 
   let releaseSplat!: () => void;
   const splatRelease = new Promise<void>((resolve) => {
@@ -328,7 +354,7 @@ test('source loading keeps controls responsive and can be cancelled', async ({ p
     };
   });
 
-  const { server, url } = await serveDirectory(path.join(repoRoot, 'apps/gui/dist'));
+  const { server, url } = await serveDirectory(path.join(repoRoot, 'apps/desktop/dist'));
   try {
     await page.goto(`${url}/index.html`);
     await page.getByLabel('Source PLY/SPLAT Path').fill('tests/fixtures/minimal.splat');

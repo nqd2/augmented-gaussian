@@ -2,6 +2,8 @@ import { type Bounds } from '../domains/calibration';
 
 export type Manifest = {
   version: number;
+  schemaVersion?: number;
+  outputDir?: string;
   source: {
     format: string;
     splatCount: number;
@@ -35,6 +37,7 @@ export const stageProgress: Record<string, number> = {
   decode: 12,
   alignment: 24,
   filters: 34,
+  reconstruct: 56,
   voxelize: 48,
   fill: 58,
   carve: 68,

@@ -35,12 +35,14 @@ function App() {
   const isCalibrationValid = useMemo(() =>
     sourceLoader.isSourceReady && calibration.distance > 0 &&
     calibration.isFloorCalibrated && calibration.isScaleCalibrated &&
+    calibration.hasValidReconstructionAdapter &&
     editor.visible && !editor.deleted,
     [
       sourceLoader.isSourceReady,
       calibration.distance,
       calibration.isFloorCalibrated,
       calibration.isScaleCalibrated,
+      calibration.hasValidReconstructionAdapter,
       editor.visible,
       editor.deleted,
     ]
@@ -153,6 +155,11 @@ function App() {
               setUpAxis={calibration.setUpAxis}
               geometryProfile={calibration.geometryProfile}
               setGeometryProfile={calibration.setGeometryProfile}
+              reconstructionMethod={calibration.reconstructionMethod}
+              setReconstructionMethod={calibration.setReconstructionMethod}
+              adapterCommand={calibration.adapterCommand}
+              setAdapterCommand={calibration.setAdapterCommand}
+              hasValidReconstructionAdapter={calibration.hasValidReconstructionAdapter}
               sceneTransform={editor.transform}
               setSceneTransformAxis={editor.setTransformAxis}
               resetSceneTransform={editor.resetTransform}

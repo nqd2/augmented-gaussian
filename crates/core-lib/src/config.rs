@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct ProcessConfig {
     #[serde(default)]
+    pub reconstruction: ReconstructionConfig,
+    #[serde(default)]
     pub voxel: VoxelConfig,
     #[serde(default)]
     pub voxel_fill: VoxelFillConfig,
@@ -15,6 +17,62 @@ pub struct ProcessConfig {
     pub navmesh: NavmeshConfig,
     #[serde(default)]
     pub export: ExportConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReconstructionConfig {
+    #[serde(default)]
+    pub method: ReconstructionMethod,
+    #[serde(default)]
+    pub adapter_command: Option<String>,
+    #[serde(default = "default_target_tris")]
+    pub target_triangles: u32,
+    #[serde(default = "default_timeout")]
+    pub timeout_seconds: u32,
+}
+
+impl Default for ReconstructionConfig {
+    fn default() -> Self {
+        Self {
+            method: ReconstructionMethod::Voxel,
+            adapter_command: None,
+            target_triangles: default_target_tris(),
+            timeout_seconds: default_timeout(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReconstructionMethod {
+    Voxel,
+    Sugar,
+    Poisson,
+}
+
+impl Default for ReconstructionMethod {
+    fn default() -> Self {
+        Self::Voxel
+    }
+}
+
+impl ReconstructionMethod {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Voxel => "voxel",
+            Self::Sugar => "sugar",
+            Self::Poisson => "poisson",
+        }
+    }
+}
+
+fn default_target_tris() -> u32 {
+    50_000
+}
+
+fn default_timeout() -> u32 {
+    900
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -237,6 +295,52 @@ fn default_filter_min_contribution() -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_process_config_defaults_to_voxel_reconstruction() {
+        let config: ProcessConfig = serde_json::from_str(
+            r#"{
+              "voxel": { "backend": "cpu", "size": 0.25, "opacityThreshold": 0.05 },
+              "mesh": { "mode": "faces" },
+              "navmesh": { "enabled": false, "agentHeight": 1.6, "agentRadius": 0.2, "maxSlopeDegrees": 45.0, "cellSize": 0.1, "cellHeight": 0.05, "walkableClimb": 0.25, "minRegionSize": 4, "mergeRegionSize": 12 }
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.reconstruction.method, ReconstructionMethod::Voxel);
+        assert_eq!(config.reconstruction.adapter_command, None);
+        assert_eq!(config.reconstruction.target_triangles, 50_000);
+        assert_eq!(config.reconstruction.timeout_seconds, 900);
+    }
+
+    #[test]
+    fn process_config_parses_all_reconstruction_methods() {
+        for (value, method) in [
+            ("voxel", ReconstructionMethod::Voxel),
+            ("sugar", ReconstructionMethod::Sugar),
+            ("poisson", ReconstructionMethod::Poisson),
+        ] {
+            let config: ProcessConfig = serde_json::from_str(&format!(
+                r#"{{
+                  "reconstruction": {{
+                    "method": "{value}",
+                    "adapterCommand": "adapter",
+                    "targetTriangles": 1234,
+                    "timeoutSeconds": 12
+                  }}
+                }}"#,
+            ))
+            .unwrap();
+
+            assert_eq!(config.reconstruction.method, method);
+            assert_eq!(
+                config.reconstruction.adapter_command.as_deref(),
+                Some("adapter")
+            );
+            assert_eq!(config.reconstruction.target_triangles, 1234);
+            assert_eq!(config.reconstruction.timeout_seconds, 12);
+        }
+    }
 
     #[test]
     fn recipe_bundle_accepts_gui_camel_case_filter_cluster_fields() {

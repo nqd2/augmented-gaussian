@@ -26,6 +26,9 @@ test('exported WebAR bundle page loads all declared assets', async ({ page }) =>
   );
 
   expect(existsSync(path.join(outDir, 'index.html'))).toBe(true);
+  const html = readFileSync(path.join(outDir, 'index.html'), 'utf8');
+  expect(html).toContain('@google/model-viewer@3.4.0');
+  expect(html).toContain('ar-modes="webxr scene-viewer quick-look"');
   expect(existsSync(path.join(outDir, 'assets/js/playcanvas.min.js'))).toBe(true);
   expect(existsSync(path.join(outDir, 'webar.zip'))).toBe(true);
   expect(statSync(path.join(outDir, 'webar.zip')).size).toBeGreaterThan(0);
@@ -44,6 +47,9 @@ test('exported WebAR bundle page loads all declared assets', async ({ page }) =>
     await expect(page.locator('body')).toHaveAttribute('data-loaded', 'true');
     await expect(page.locator('body')).toHaveAttribute('data-camera-ready', 'true');
     await expect(page.locator('#assets li')).toHaveCount(declaredAssetCount);
+    await expect(page.locator('#ar-viewer')).toHaveAttribute('src', manifest.artifacts.occlusionGlb);
+    await page.locator('#reconstruction-method').selectOption('sugar');
+    await expect(page.locator('#ar-viewer')).toHaveAttribute('src', manifest.artifacts.occlusionGlb);
     const screenshot = await page.locator('#viewport').screenshot();
     expect(pngHasVisibleVariation(screenshot)).toBe(true);
   } finally {

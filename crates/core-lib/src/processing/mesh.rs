@@ -1,5 +1,5 @@
 use crate::config::MeshMode;
-use crate::error::AgResult;
+use crate::error::{AgError, AgResult};
 use crate::math::Vec3;
 use crate::voxel::VoxelGrid;
 use lin_alg::f32::Vec3 as McVec3;
@@ -19,6 +19,36 @@ impl Mesh {
     pub fn triangle_count(&self) -> usize {
         self.indices.len() / 3
     }
+}
+
+pub fn validate_mesh(mesh: &Mesh) -> AgResult<()> {
+    if mesh.indices.is_empty() || mesh.vertices.is_empty() {
+        return Err(AgError::InvalidInput(
+            "mesh must contain at least one triangle".to_string(),
+        ));
+    }
+    if !mesh.indices.len().is_multiple_of(3) {
+        return Err(AgError::InvalidInput(
+            "mesh index buffer length must be divisible by 3".to_string(),
+        ));
+    }
+    if mesh
+        .vertices
+        .iter()
+        .flatten()
+        .any(|value| !value.is_finite())
+    {
+        return Err(AgError::InvalidInput(
+            "mesh vertices must be finite".to_string(),
+        ));
+    }
+    let vertex_count = mesh.vertices.len() as u32;
+    if mesh.indices.iter().any(|index| *index >= vertex_count) {
+        return Err(AgError::InvalidInput(
+            "mesh indices must reference existing vertices".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 pub fn extract_mesh(grid: &VoxelGrid, mode: MeshMode) -> AgResult<Mesh> {
@@ -412,6 +442,34 @@ fn v(x: f32, y: f32, z: f32) -> Vec3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validate_mesh_rejects_empty_mesh() {
+        let err = validate_mesh(&Mesh::default()).unwrap_err().to_string();
+        assert!(err.contains("mesh must contain at least one triangle"));
+    }
+
+    #[test]
+    fn validate_mesh_rejects_bad_index_count() {
+        let mesh = Mesh {
+            vertices: vec![[0.0, 0.0, 0.0]],
+            indices: vec![0, 0],
+            triangles_before_merge: 0,
+        };
+        let err = validate_mesh(&mesh).unwrap_err().to_string();
+        assert!(err.contains("index buffer length must be divisible by 3"));
+    }
+
+    #[test]
+    fn validate_mesh_rejects_non_finite_vertices() {
+        let mesh = Mesh {
+            vertices: vec![[0.0, 0.0, 0.0], [1.0, f32::NAN, 0.0], [0.0, 1.0, 0.0]],
+            indices: vec![0, 1, 2],
+            triangles_before_merge: 1,
+        };
+        let err = validate_mesh(&mesh).unwrap_err().to_string();
+        assert!(err.contains("mesh vertices must be finite"));
+    }
 
     #[test]
     fn single_voxel_has_six_exposed_faces() {

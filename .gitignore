@@ -13,13 +13,13 @@ target/
 *.so
 web/node_modules/
 web/dist/
-apps/gui/node_modules/
-apps/gui/dist/
-apps/gui/test-results/
+apps/desktop/node_modules/
+apps/desktop/dist/
+apps/desktop/test-results/
 web/pnpm-lock.yaml
 web/pnpm-workspace.yaml
 src-tauri/target/
-apps/gui/src-tauri/target/
+apps/desktop/src-tauri/target/
 
 # output
 results/

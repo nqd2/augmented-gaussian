@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct Manifest {
     pub version: u32,
+    pub schema_version: u32,
+    pub output_dir: String,
     pub source: SourceStats,
     pub alignment: AlignmentManifest,
     pub bounds: Option<Bounds>,
@@ -62,6 +64,9 @@ impl Default for AlignmentManifest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Metrics {
+    pub reconstruction_method: String,
+    pub reconstruction_ms: u128,
+    pub reconstruction_adapter_status: Option<String>,
     pub decode_ms: u128,
     pub alignment_ms: u128,
     pub voxel_ms: u128,
