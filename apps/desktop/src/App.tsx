@@ -130,8 +130,6 @@ function App() {
               setInputPath={sourceLoader.setInputPath}
               handleBrowseInputPath={sourceLoader.handleBrowseInputPath}
               scene={editor.sceneState}
-              cameraMode={editor.cameraMode}
-              setCameraMode={editor.setCameraMode}
               setSceneVisible={editor.setVisible}
               deleteScene={() => editor.setDeleted(true)}
               resetScene={editor.resetScene}
@@ -181,9 +179,9 @@ function App() {
               onSourceProgress={sourceLoader.handleSourceProgress}
               onSourceReady={sourceLoader.handleSourceReady}
               onSourceError={sourceLoader.handleSourceError}
+              previewMaxSplats={sourceLoader.previewMaxSplats}
               upAxis={calibration.upAxis}
               sceneTransform={editor.transform}
-              cameraMode={editor.cameraMode}
               sceneVisible={editor.visible && !editor.deleted}
             />
           </section>

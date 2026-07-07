@@ -37,4 +37,26 @@ describe('splat preview parser', () => {
 
     expect(() => parseSplatColumns(bytes)).toThrow(/scale/);
   });
+
+  it('downsamples rows with deterministic stride', () => {
+    const bytes = new Uint8Array(32 * 4);
+    const view = new DataView(bytes.buffer);
+    for (let i = 0; i < 4; i += 1) {
+      const offset = i * 32;
+      view.setFloat32(offset + 0, i, true);
+      view.setFloat32(offset + 4, i + 10, true);
+      view.setFloat32(offset + 8, i + 20, true);
+      view.setFloat32(offset + 12, 1, true);
+      view.setFloat32(offset + 16, 1, true);
+      view.setFloat32(offset + 20, 1, true);
+      bytes.set([128, 128, 128, 128, 255, 128, 128, 128], offset + 24);
+    }
+
+    const parsed = parseSplatColumns(bytes, 2);
+
+    expect(parsed.count).toBe(2);
+    expect(parsed.sourceCount).toBe(4);
+    expect([...parsed.columns.x]).toEqual([0, 2]);
+    expect([...parsed.columns.y]).toEqual([10, 12]);
+  });
 });

@@ -10,8 +10,8 @@
 
 ### Changed
 
-- Manifest JSON now includes `schemaVersion = 2`, `outputDir`, and reconstruction metrics.
+- Manifest JSON includes `schemaVersion = 2`, `outputDir`, and reconstruction metrics.
 
 ### BREAKING CHANGE
 
-- Tools that parse `manifest.json` should handle schema version 2 and the new top-level `outputDir` plus `metrics.reconstruction*` fields.
+- Tools that parse `manifest.json` need schema version 2 support, including top-level `outputDir` and `metrics.reconstruction*` fields.

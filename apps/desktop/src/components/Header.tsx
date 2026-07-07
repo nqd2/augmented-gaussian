@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button } from '@astryxdesign/core/Button';
 import { Play, Square } from 'lucide-react';
+import { type SourceMetadata } from './Preview';
 
 export function Header({
   inputPath,
@@ -12,7 +13,7 @@ export function Header({
   cancelJob,
 }: {
   inputPath: string;
-  sourceMetadata: any;
+  sourceMetadata: SourceMetadata | null;
   isBusy: boolean;
   isCalibrationValid: boolean;
   loadSource: () => void;
@@ -38,7 +39,7 @@ export function Header({
           isDisabled={!isCalibrationValid || isBusy}
           onClick={runProcess}
           icon={<Play size={14} />}
-          tooltip={!isCalibrationValid ? "Complete calibration first" : undefined}
+          tooltip={!isCalibrationValid ? "Set scale endpoints first" : undefined}
         />
         <Button
           label="Cancel Job"

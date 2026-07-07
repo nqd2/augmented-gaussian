@@ -93,7 +93,7 @@ export function ConfigPanel({
                   label="Output Directory"
                   value={outDir}
                   onChange={(val: string) => setOutDir(val)}
-                  status={outDir ? { type: 'success', message: isDefaultExportRoot(outDir) ? '(tự động tạo sub-folder theo tên file)' : undefined } : undefined}
+                  status={outDir ? { type: 'success', message: isDefaultExportRoot(outDir) ? 'Creates a timestamped subfolder.' : undefined } : undefined}
                 />
                 <Button
                   label="Browse"
@@ -161,14 +161,14 @@ export function ConfigPanel({
                 ]}
                 value={reconstructionMethod}
                 onChange={(val: string) => setReconstructionMethod(val as ReconstructionMethod)}
-                status={hasValidReconstructionAdapter ? { type: 'success' } : { type: 'error', message: 'External reconstruction adapter command required.' }}
+                status={hasValidReconstructionAdapter ? { type: 'success' } : { type: 'error', message: 'Adapter command required.' }}
               />
               <TextInput
                 label="Adapter Command"
                 value={adapterCommand}
                 onChange={(val: string) => setAdapterCommand(val)}
                 placeholder="python adapters/poisson.py"
-                status={hasValidReconstructionAdapter ? undefined : { type: 'error', message: 'External reconstruction adapter command required.' }}
+                status={hasValidReconstructionAdapter ? undefined : { type: 'error', message: 'Adapter command required.' }}
               />
               <E2eSelector
                 label="Bake Profile"
@@ -187,6 +187,7 @@ export function ConfigPanel({
 
           <PointEditor
             title="Scale endpoints"
+            pointLabel="Scale"
             points={scalePoints}
             pickModePrefix="scale"
             currentPickMode={pickMode}

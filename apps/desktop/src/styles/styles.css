@@ -402,6 +402,26 @@ h1 {
   margin-bottom: 2px;
 }
 
+.point-editor-item {
+  margin-bottom: 12px;
+}
+
+.point-row-header,
+.point-row-actions {
+  display: flex;
+  align-items: center;
+}
+
+.point-row-header {
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.point-row-actions {
+  gap: 6px;
+}
+
 .point-row {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

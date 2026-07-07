@@ -7,6 +7,7 @@ import { type Point3, type PickMode } from '../domains/calibration';
 
 export function PointEditor({
   title,
+  pointLabel,
   points,
   pickModePrefix,
   currentPickMode,
@@ -15,6 +16,7 @@ export function PointEditor({
   onChange,
 }: {
   title: string;
+  pointLabel: string;
   points: readonly Point3[];
   pickModePrefix: string;
   currentPickMode: PickMode;
@@ -28,13 +30,13 @@ export function PointEditor({
         const pointPickMode = `${pickModePrefix}${pointIndex}` as PickMode;
         const isActive = currentPickMode === pointPickMode;
         const isPicked = userPickedStates[pointIndex];
-        const pointName = `${title.replace('endpoints', '').replace('points', '').trim()} Point ${pointIndex + 1}`;
+        const pointName = `${pointLabel} Point ${pointIndex + 1}`;
 
         return (
-          <div key={`${title}-${pointIndex}`} style={{ marginBottom: '12px' }}>
-            <div className="point-row-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' }}>
+          <div key={`${title}-${pointIndex}`} className="point-editor-item">
+            <div className="point-row-header">
               <span className="point-row-label">{pointName}</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div className="point-row-actions">
                 <Button
                   label={isActive ? "Picking" : "Pick"}
                   variant={isActive ? "primary" : "ghost"}

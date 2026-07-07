@@ -41,9 +41,7 @@ describe('calibration profile defaults', () => {
   });
 
   it('does not inject filterCluster for any bake profile', () => {
-    expect(makeEditRecipe(defaultScalePoints, 2, 'object-prop').operations).toEqual([]);
-    expect(makeEditRecipe(defaultScalePoints, 2, 'interior-room').operations).toEqual([]);
-    expect(makeEditRecipe(defaultScalePoints, 2, 'outdoor-terrain').operations).toEqual([]);
+    expect(makeEditRecipe().operations).toEqual([]);
   });
 
   it('keeps room and terrain process profile behavior explicit', () => {

@@ -418,6 +418,9 @@ fn reconstruct_with_voxel(
     wgpu_ctx: Option<&crate::gpu::WgpuContext>,
 ) -> AgResult<ReconstructionOutcome> {
     let reconstruction_start = Instant::now();
+    let mut floater_filter_input_count = 0;
+    let mut floater_filter_output_count = 0;
+    let mut floater_filter_removed_count = 0;
     progress("voxelize");
     let voxel_params = VoxelParams {
         size: config.voxel.size,

@@ -1,0 +1,1673 @@
+<!doctype html>
+<html lang="vi" class="h-full">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>3D View & Interaction Editor (Unity & GeoGebra Style)</title>
+        <!-- Tailwind CSS for UI Layout -->
+        <script src="https://cdn.tailwindcss.com"></script>
+        <!-- FontAwesome Icons for tools -->
+        <link
+            rel="stylesheet"
+            href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+        />
+        <!-- Google Font Inter -->
+        <link
+            href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+            rel="stylesheet"
+        />
+
+        <style>
+            body {
+                font-family: "Inter", sans-serif;
+                user-select: none;
+                overflow: hidden;
+            }
+            /* Custom scrollbar for Dark Theme Panels */
+            ::-webkit-scrollbar {
+                width: 6px;
+                height: 6px;
+            }
+            ::-webkit-scrollbar-track {
+                background: #1e1e24;
+            }
+            ::-webkit-scrollbar-thumb {
+                background: #3f3f46;
+                border-radius: 3px;
+            }
+            ::-webkit-scrollbar-thumb:hover {
+                background: #52525b;
+            }
+            /* Disable highlight during dragging/transforming */
+            .no-select {
+                -webkit-user-select: none;
+                -moz-user-select: none;
+                -ms-user-select: none;
+                user-select: none;
+            }
+        </style>
+    </head>
+    <body class="h-full bg-[#121214] text-gray-200 flex flex-col no-select">
+        <!-- App Header -->
+        <header
+            class="bg-[#1a1a1e] border-b border-[#2d2d34] px-4 py-2 flex items-center justify-between z-10 shrink-0"
+        >
+            <div class="flex items-center space-x-3">
+                <div
+                    class="bg-gradient-to-tr from-indigo-500 to-purple-600 p-2 rounded-lg text-white"
+                >
+                    <i class="fa-solid fa-cube text-xl animate-pulse"></i>
+                </div>
+                <div>
+                    <h1
+                        class="text-sm font-bold tracking-wider uppercase text-white"
+                    >
+                        GeoUnity 3D Studio
+                    </h1>
+                    <p class="text-[10px] text-gray-400">
+                        Interactive Spatial Geometry & Graphing Editor
+                    </p>
+                </div>
+            </div>
+
+            <!-- Center Gizmo Quick Tools -->
+            <div
+                class="flex items-center bg-[#24242b] p-1 rounded-lg border border-[#353540] space-x-1"
+            >
+                <button
+                    id="tool-select"
+                    onclick="setGizmoMode('select')"
+                    class="px-3 py-1.5 rounded text-xs font-semibold flex items-center space-x-1 transition bg-[#3b82f6] text-white"
+                    title="Chọn đối tượng (Q)"
+                >
+                    <i class="fa-solid fa-arrow-pointer"></i>
+                    <span class="hidden md:inline">Select</span>
+                </button>
+                <button
+                    id="tool-translate"
+                    onclick="setGizmoMode('translate')"
+                    class="px-3 py-1.5 rounded text-xs font-semibold flex items-center space-x-1 transition text-gray-400 hover:text-white"
+                    title="Dịch chuyển tọa độ (W)"
+                >
+                    <i class="fa-solid fa-arrows-up-down-left-right"></i>
+                    <span class="hidden md:inline">Move</span>
+                </button>
+                <button
+                    id="tool-rotate"
+                    onclick="setGizmoMode('rotate')"
+                    class="px-3 py-1.5 rounded text-xs font-semibold flex items-center space-x-1 transition text-gray-400 hover:text-white"
+                    title="Xoay hướng (E)"
+                >
+                    <i class="fa-solid fa-rotate"></i>
+                    <span class="hidden md:inline">Rotate</span>
+                </button>
+                <button
+                    id="tool-scale"
+                    onclick="setGizmoMode('scale')"
+                    class="px-3 py-1.5 rounded text-xs font-semibold flex items-center space-x-1 transition text-gray-400 hover:text-white"
+                    title="Độ co giãn (R)"
+                >
+                    <i class="fa-solid fa-maximize"></i>
+                    <span class="hidden md:inline">Scale</span>
+                </button>
+            </div>
+
+            <!-- Viewport settings -->
+            <div class="flex items-center space-x-3">
+                <button
+                    onclick="resetCamera()"
+                    class="bg-[#24242b] hover:bg-[#32323d] text-gray-300 hover:text-white px-3 py-1.5 rounded border border-[#353540] text-xs flex items-center space-x-1.5 transition"
+                >
+                    <i class="fa-solid fa-camera-rotate"></i>
+                    <span>Reset View</span>
+                </button>
+                <div
+                    class="hidden sm:flex items-center space-x-2 text-xs text-gray-400"
+                >
+                    <span class="bg-[#2a2a35] px-2 py-1 rounded text-[10px]"
+                        >W/E/R: Transform</span
+                    >
+                    <span class="bg-[#2a2a35] px-2 py-1 rounded text-[10px]"
+                        >Del: Delete</span
+                    >
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Workspace Container -->
+        <div class="flex flex-1 w-full overflow-hidden relative">
+            <!-- LEFT PANEL: Scene Hierarchy & Object Creation -->
+            <aside
+                class="w-80 bg-[#17171a] border-r border-[#2d2d34] flex flex-col shrink-0 z-10 transition-all duration-300"
+                id="hierarchy-panel"
+            >
+                <!-- Add Object Header -->
+                <div class="p-3 border-b border-[#2d2d34] bg-[#1a1a1e]">
+                    <h2
+                        class="text-xs font-semibold uppercase tracking-wider text-indigo-400 mb-2 flex items-center justify-between"
+                    >
+                        <span
+                            ><i class="fa-solid fa-plus-circle mr-1"></i> Tạo
+                            Vật Thể Mới</span
+                        >
+                    </h2>
+                    <!-- Toolbox Grid -->
+                    <div class="grid grid-cols-2 gap-2 mt-2">
+                        <button
+                            onclick="addObject('point')"
+                            class="bg-[#212126] hover:bg-[#2d2d35] p-2 rounded border border-[#2d2d34] text-left text-xs transition flex items-center space-x-2"
+                        >
+                            <span
+                                class="w-2 h-2 rounded-full bg-red-500"
+                            ></span>
+                            <span>Điểm (Point)</span>
+                        </button>
+                        <button
+                            onclick="addObject('segment')"
+                            class="bg-[#212126] hover:bg-[#2d2d35] p-2 rounded border border-[#2d2d34] text-left text-xs transition flex items-center space-x-2"
+                        >
+                            <i
+                                class="fa-solid fa-arrows-alt-h text-yellow-500"
+                            ></i>
+                            <span>Đoạn Thẳng</span>
+                        </button>
+                        <button
+                            onclick="addObject('cube')"
+                            class="bg-[#212126] hover:bg-[#2d2d35] p-2 rounded border border-[#2d2d34] text-left text-xs transition flex items-center space-x-2"
+                        >
+                            <i class="fa-solid fa-cube text-blue-400"></i>
+                            <span>Khối Hộp</span>
+                        </button>
+                        <button
+                            onclick="addObject('sphere')"
+                            class="bg-[#212126] hover:bg-[#2d2d35] p-2 rounded border border-[#2d2d34] text-left text-xs transition flex items-center space-x-2"
+                        >
+                            <i class="fa-solid fa-circle text-green-400"></i>
+                            <span>Khối Cầu</span>
+                        </button>
+                        <button
+                            onclick="addObject('cylinder')"
+                            class="bg-[#212126] hover:bg-[#2d2d35] p-2 rounded border border-[#2d2d34] text-left text-xs transition flex items-center space-x-2"
+                        >
+                            <i class="fa-solid fa-database text-purple-400"></i>
+                            <span>Khối Trụ</span>
+                        </button>
+                        <button
+                            onclick="addObject('cone')"
+                            class="bg-[#212126] hover:bg-[#2d2d35] p-2 rounded border border-[#2d2d34] text-left text-xs transition flex items-center space-x-2"
+                        >
+                            <i
+                                class="fa-solid fa-triangle-exclamation text-orange-400"
+                            ></i>
+                            <span>Khối Nón</span>
+                        </button>
+                        <button
+                            onclick="addObject('plane')"
+                            class="bg-[#212126] hover:bg-[#2d2d35] p-2 rounded border border-[#2d2d34] text-left text-xs transition flex items-center space-x-2"
+                        >
+                            <i
+                                class="fa-solid fa-square-full text-pink-400 text-[10px]"
+                            ></i>
+                            <span>Mặt Phẳng</span>
+                        </button>
+                        <button
+                            onclick="openFormulaModal()"
+                            class="bg-indigo-950/40 hover:bg-indigo-900/40 p-2 rounded border border-indigo-900 text-left text-xs transition flex items-center space-x-2 text-indigo-300"
+                        >
+                            <i class="fa-solid fa-chart-area"></i>
+                            <span>Đồ Thị 3D z=f(x,y)</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Hierarchy List -->
+                <div class="flex-1 flex flex-col min-h-0">
+                    <div
+                        class="p-3 border-b border-[#2d2d34] bg-[#1a1a1e] flex justify-between items-center shrink-0"
+                    >
+                        <h2
+                            class="text-xs font-semibold uppercase tracking-wider text-gray-400"
+                        >
+                            Danh sách đối tượng (Hierarchy)
+                        </h2>
+                        <span
+                            id="object-counter"
+                            class="text-[10px] bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded-full"
+                            >0</span
+                        >
+                    </div>
+                    <div
+                        class="flex-1 overflow-y-auto p-2 space-y-1"
+                        id="hierarchy-list"
+                    >
+                        <!-- Dynamic List of Objects gets injected here -->
+                        <div
+                            class="text-center text-xs text-zinc-500 py-8"
+                            id="empty-hierarchy-msg"
+                        >
+                            Chưa có đối tượng nào.<br />Hãy bấm vào nút ở trên
+                            để thêm.
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- CENTER VIEWPORT: Canvas Area -->
+            <main class="flex-1 h-full relative flex flex-col bg-[#0b0b0c]">
+                <!-- Canvas Object Container -->
+                <div
+                    id="canvas-container"
+                    class="w-full flex-1 relative outline-none"
+                >
+                    <!-- Overlay Legend/Indicator for controls -->
+                    <div
+                        class="absolute bottom-4 left-4 bg-[#141417]/90 backdrop-blur border border-zinc-800 p-3 rounded-lg text-xs space-y-1.5 text-zinc-300 shadow-xl pointer-events-none z-10 max-w-xs"
+                    >
+                        <div class="font-bold text-white mb-1">
+                            <i class="fa-solid fa-hand"></i> Thao tác Góc nhìn
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <kbd
+                                class="px-1.5 py-0.5 bg-zinc-800 text-white rounded text-[10px] border border-zinc-700"
+                                >Chuột trái + Kéo</kbd
+                            >
+                            <span>Xoay không gian</span>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <kbd
+                                class="px-1.5 py-0.5 bg-zinc-800 text-white rounded text-[10px] border border-zinc-700"
+                                >Cuộn chuột / 2 ngón</kbd
+                            >
+                            <span>Phóng to / Thu nhỏ</span>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <kbd
+                                class="px-1.5 py-0.5 bg-zinc-800 text-white rounded text-[10px] border border-zinc-700"
+                                >Chuột phải + Kéo</kbd
+                            >
+                            <span>Di chuyển camera</span>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <kbd
+                                class="px-1.5 py-0.5 bg-zinc-800 text-white rounded text-[10px] border border-zinc-700"
+                                >Click đúp</kbd
+                            >
+                            <span>Chọn đối tượng trực tiếp</span>
+                        </div>
+                    </div>
+
+                    <!-- Three.js Canvas gets appended here -->
+                </div>
+
+                <!-- Quick Viewport Toggles -->
+                <div
+                    class="absolute top-4 right-4 bg-[#141417]/80 backdrop-blur border border-zinc-800 rounded-lg p-1.5 flex items-center space-x-2 shadow-lg z-10"
+                >
+                    <button
+                        onclick="toggleGrid()"
+                        id="toggle-grid"
+                        class="p-1.5 rounded hover:bg-zinc-800 text-indigo-400 text-xs transition"
+                        title="Bật/Tắt Lưới"
+                    >
+                        <i class="fa-solid fa-border-all"></i>
+                        <span class="hidden sm:inline ml-1 text-[11px]"
+                            >Grid</span
+                        >
+                    </button>
+                    <div class="h-4 w-px bg-zinc-800"></div>
+                    <button
+                        onclick="toggleAxes()"
+                        id="toggle-axes"
+                        class="p-1.5 rounded hover:bg-zinc-800 text-indigo-400 text-xs transition"
+                        title="Bật/Tắt Trục"
+                    >
+                        <i class="fa-solid fa-arrows-to-dot"></i>
+                        <span class="hidden sm:inline ml-1 text-[11px]"
+                            >Axes</span
+                        >
+                    </button>
+                    <div class="h-4 w-px bg-zinc-800"></div>
+                    <button
+                        onclick="toggleShadows()"
+                        id="toggle-shadows"
+                        class="p-1.5 rounded hover:bg-zinc-800 text-indigo-400 text-xs transition"
+                        title="Bật/Tắt bóng đổ"
+                    >
+                        <i class="fa-regular fa-sun"></i>
+                        <span class="hidden sm:inline ml-1 text-[11px]"
+                            >Shadows</span
+                        >
+                    </button>
+                </div>
+            </main>
+
+            <!-- RIGHT PANEL: Inspector (Properties Editor) -->
+            <aside
+                class="w-80 bg-[#17171a] border-l border-[#2d2d34] flex flex-col shrink-0 z-10 transition-all duration-300"
+                id="inspector-panel"
+            >
+                <div
+                    class="p-3 border-b border-[#2d2d34] bg-[#1a1a1e] flex justify-between items-center shrink-0"
+                >
+                    <h2
+                        class="text-xs font-semibold uppercase tracking-wider text-amber-500 flex items-center"
+                    >
+                        <i class="fa-solid fa-sliders mr-1.5"></i> Thuộc Tính
+                        (Inspector)
+                    </h2>
+                    <button
+                        onclick="deselectAll()"
+                        class="text-[10px] text-zinc-500 hover:text-white transition"
+                    >
+                        Hủy chọn
+                    </button>
+                </div>
+
+                <!-- Empty State Inspector -->
+                <div
+                    id="inspector-empty"
+                    class="flex-1 flex flex-col items-center justify-center p-6 text-center text-xs text-zinc-500"
+                >
+                    <i class="fa-solid fa-cube text-4xl mb-3 text-zinc-700"></i>
+                    <p>
+                        Nhấp chọn đối tượng trong không gian hoặc trên cây
+                        Hierarchy để bắt đầu chỉnh sửa.
+                    </p>
+                </div>
+
+                <!-- Content Inspector (Hidden when none selected) -->
+                <div
+                    id="inspector-content"
+                    class="flex-1 overflow-y-auto hidden"
+                >
+                    <!-- Object Meta -->
+                    <div class="p-4 border-b border-[#2d2d34] bg-zinc-900/30">
+                        <div class="mb-3">
+                            <label
+                                class="text-[10px] font-bold uppercase tracking-wider text-zinc-400 block mb-1"
+                                >Tên Đối Tượng</label
+                            >
+                            <input
+                                type="text"
+                                id="obj-name"
+                                oninput="updateSelectedProperties()"
+                                class="w-full bg-[#202026] border border-[#2d2d34] rounded px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                            />
+                        </div>
+                        <div class="flex space-x-3">
+                            <div class="w-1/2">
+                                <label
+                                    class="text-[10px] font-bold uppercase tracking-wider text-zinc-400 block mb-1"
+                                    >Màu Sắc</label
+                                >
+                                <div class="flex items-center space-x-2">
+                                    <input
+                                        type="color"
+                                        id="obj-color"
+                                        oninput="updateSelectedProperties()"
+                                        class="w-8 h-8 rounded border-0 bg-transparent cursor-pointer"
+                                    />
+                                    <span
+                                        class="text-xs font-mono text-zinc-300 uppercase"
+                                        id="obj-color-hex"
+                                        >#ffffff</span
+                                    >
+                                </div>
+                            </div>
+                            <div class="w-1/2">
+                                <label
+                                    class="text-[10px] font-bold uppercase tracking-wider text-zinc-400 block mb-1"
+                                    >Chất Liệu</label
+                                >
+                                <select
+                                    id="obj-material"
+                                    onchange="updateSelectedProperties()"
+                                    class="w-full bg-[#202026] border border-[#2d2d34] rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                                >
+                                    <option value="standard">
+                                        Mặc định (Solid)
+                                    </option>
+                                    <option value="wireframe">
+                                        Khung dây (Wire)
+                                    </option>
+                                    <option value="phong">
+                                        Bóng loáng (Glassy)
+                                    </option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Transform Coordinates -->
+                    <div class="p-4 border-b border-[#2d2d34] space-y-4">
+                        <h3
+                            class="text-[10px] font-bold uppercase tracking-wider text-indigo-400 flex items-center"
+                        >
+                            <i
+                                class="fa-solid fa-arrows-up-down-left-right mr-1.5"
+                            ></i>
+                            VỊ TRÍ (POSITION)
+                        </h3>
+                        <div class="grid grid-cols-3 gap-2">
+                            <div>
+                                <span class="text-[10px] text-red-500 font-bold"
+                                    >X</span
+                                >
+                                <input
+                                    type="number"
+                                    step="0.1"
+                                    id="pos-x"
+                                    oninput="updateSelectedProperties()"
+                                    class="w-full bg-[#202026] border border-red-950 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-red-500"
+                                />
+                            </div>
+                            <div>
+                                <span
+                                    class="text-[10px] text-green-500 font-bold"
+                                    >Y</span
+                                >
+                                <input
+                                    type="number"
+                                    step="0.1"
+                                    id="pos-y"
+                                    oninput="updateSelectedProperties()"
+                                    class="w-full bg-[#202026] border border-green-950 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-green-500"
+                                />
+                            </div>
+                            <div>
+                                <span
+                                    class="text-[10px] text-blue-500 font-bold"
+                                    >Z</span
+                                >
+                                <input
+                                    type="number"
+                                    step="0.1"
+                                    id="pos-z"
+                                    oninput="updateSelectedProperties()"
+                                    class="w-full bg-[#202026] border border-blue-950 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
+                                />
+                            </div>
+                        </div>
+
+                        <h3
+                            class="text-[10px] font-bold uppercase tracking-wider text-green-400 flex items-center pt-2"
+                        >
+                            <i class="fa-solid fa-rotate mr-1.5"></i> GÓC XOAY
+                            (ROTATION - ĐỘ)
+                        </h3>
+                        <div class="grid grid-cols-3 gap-2">
+                            <div>
+                                <span class="text-[10px] text-red-500 font-bold"
+                                    >X°</span
+                                >
+                                <input
+                                    type="number"
+                                    step="1"
+                                    id="rot-x"
+                                    oninput="updateSelectedProperties()"
+                                    class="w-full bg-[#202026] border border-red-950 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-red-500"
+                                />
+                            </div>
+                            <div>
+                                <span
+                                    class="text-[10px] text-green-500 font-bold"
+                                    >Y°</span
+                                >
+                                <input
+                                    type="number"
+                                    step="1"
+                                    id="rot-y"
+                                    oninput="updateSelectedProperties()"
+                                    class="w-full bg-[#202026] border border-green-950 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-green-500"
+                                />
+                            </div>
+                            <div>
+                                <span
+                                    class="text-[10px] text-blue-500 font-bold"
+                                    >Z°</span
+                                >
+                                <input
+                                    type="number"
+                                    step="1"
+                                    id="rot-z"
+                                    oninput="updateSelectedProperties()"
+                                    class="w-full bg-[#202026] border border-blue-950 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
+                                />
+                            </div>
+                        </div>
+
+                        <h3
+                            class="text-[10px] font-bold uppercase tracking-wider text-pink-400 flex items-center pt-2"
+                        >
+                            <i class="fa-solid fa-maximize mr-1.5"></i> TỶ LỆ
+                            (SCALE)
+                        </h3>
+                        <div class="grid grid-cols-3 gap-2">
+                            <div>
+                                <span class="text-[10px] text-red-500 font-bold"
+                                    >X</span
+                                >
+                                <input
+                                    type="number"
+                                    step="0.1"
+                                    min="0.01"
+                                    id="scale-x"
+                                    oninput="updateSelectedProperties()"
+                                    class="w-full bg-[#202026] border border-red-950 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-red-500"
+                                />
+                            </div>
+                            <div>
+                                <span
+                                    class="text-[10px] text-green-500 font-bold"
+                                    >Y</span
+                                >
+                                <input
+                                    type="number"
+                                    step="0.1"
+                                    min="0.01"
+                                    id="scale-y"
+                                    oninput="updateSelectedProperties()"
+                                    class="w-full bg-[#202026] border border-green-950 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-green-500"
+                                />
+                            </div>
+                            <div>
+                                <span
+                                    class="text-[10px] text-blue-500 font-bold"
+                                    >Z</span
+                                >
+                                <input
+                                    type="number"
+                                    step="0.1"
+                                    min="0.01"
+                                    id="scale-z"
+                                    oninput="updateSelectedProperties()"
+                                    class="w-full bg-[#202026] border border-blue-950 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
+                                />
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Specific Parameters (E.g. GeoGebra Math Surface properties) -->
+                    <div
+                        id="math-formula-inspector"
+                        class="p-4 border-b border-[#2d2d34] hidden bg-indigo-950/20"
+                    >
+                        <h3
+                            class="text-[10px] font-bold uppercase tracking-wider text-indigo-400 flex items-center mb-2"
+                        >
+                            <i class="fa-solid fa-calculator mr-1.5"></i> Công
+                            thức Đồ thị
+                        </h3>
+                        <div class="space-y-2">
+                            <div>
+                                <span class="text-[10px] text-zinc-400"
+                                    >z = f(x, y)</span
+                                >
+                                <input
+                                    type="text"
+                                    id="math-formula-input"
+                                    onchange="updateMathSurfaceFormula()"
+                                    class="w-full bg-[#202026] border border-indigo-900 rounded px-2.5 py-1 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
+                                />
+                            </div>
+                            <div
+                                class="text-[10px] text-zinc-500 leading-relaxed"
+                            >
+                                Có thể dùng: sin(x), cos(y), sqrt(x), tan, abs,
+                                PI, *, +, -, / v.v. Bấm Enter để áp dụng đồ thị
+                                mới.
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Footer Operations inside Inspector -->
+                    <div class="p-4 space-y-2">
+                        <button
+                            onclick="deleteSelectedObject()"
+                            class="w-full bg-red-900/30 hover:bg-red-800/40 border border-red-800 text-red-200 py-2 rounded text-xs transition flex items-center justify-center space-x-1"
+                        >
+                            <i class="fa-regular fa-trash-can"></i>
+                            <span>Xóa Đối Tượng (Del)</span>
+                        </button>
+                    </div>
+                </div>
+            </aside>
+        </div>
+
+        <!-- MATH SURFACE DIALOG MODAL -->
+        <div
+            id="math-modal"
+            class="fixed inset-0 bg-black/75 flex items-center justify-center hidden z-50 p-4"
+        >
+            <div
+                class="bg-[#1a1a20] border border-indigo-900/40 rounded-xl max-w-md w-full overflow-hidden shadow-2xl flex flex-col"
+            >
+                <div
+                    class="bg-indigo-950/40 px-5 py-4 border-b border-indigo-900/30 flex justify-between items-center"
+                >
+                    <h3
+                        class="text-white font-bold text-sm flex items-center space-x-2"
+                    >
+                        <i class="fa-solid fa-chart-area text-indigo-400"></i>
+                        <span>Tạo Đồ Thị Mặt Phẳng 3D</span>
+                    </h3>
+                    <button
+                        onclick="closeFormulaModal()"
+                        class="text-zinc-500 hover:text-white transition"
+                    >
+                        <i class="fa-solid fa-times"></i>
+                    </button>
+                </div>
+                <div class="p-5 space-y-4">
+                    <div>
+                        <label
+                            class="text-xs font-semibold text-zinc-300 block mb-1"
+                            >Công thức toán học z = f(x, y)</label
+                        >
+                        <input
+                            type="text"
+                            id="modal-formula"
+                            value="sin(sqrt(x^2 + y^2))"
+                            class="w-full bg-[#121215] border border-indigo-900 rounded px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-indigo-500 shadow-inner"
+                        />
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label
+                                class="text-[10px] uppercase font-bold text-zinc-400 block mb-1"
+                                >Kích thước vùng X/Y</label
+                            >
+                            <input
+                                type="number"
+                                id="modal-range"
+                                value="10"
+                                class="w-full bg-[#121215] border border-zinc-800 rounded px-3 py-1.5 text-xs text-white focus:outline-none"
+                            />
+                        </div>
+                        <div>
+                            <label
+                                class="text-[10px] uppercase font-bold text-zinc-400 block mb-1"
+                                >Độ phân giải lưới</label
+                            >
+                            <input
+                                type="number"
+                                id="modal-segments"
+                                value="40"
+                                class="w-full bg-[#121215] border border-zinc-800 rounded px-3 py-1.5 text-xs text-white focus:outline-none"
+                            />
+                        </div>
+                    </div>
+
+                    <!-- Template list -->
+                    <div>
+                        <span
+                            class="text-[10px] uppercase font-bold text-zinc-400 block mb-2"
+                            >Gợi ý mẫu đồ thị đẹp</span
+                        >
+                        <div class="grid grid-cols-2 gap-2">
+                            <button
+                                onclick="setModalTemplate('sin(sqrt(x^2+y^2))')"
+                                class="bg-zinc-800/60 hover:bg-zinc-800 text-[11px] py-1 px-2 rounded text-left truncate text-zinc-300"
+                            >
+                                🌊 Gợn sóng (Saddle Ripple)
+                            </button>
+                            <button
+                                onclick="setModalTemplate('sin(x) * cos(y)')"
+                                class="bg-zinc-800/60 hover:bg-zinc-800 text-[11px] py-1 px-2 rounded text-left truncate text-zinc-300"
+                            >
+                                🥚 Khay đựng trứng (Eggbox)
+                            </button>
+                            <button
+                                onclick="setModalTemplate('(x^2 - y^2) * 0.1')"
+                                class="bg-zinc-800/60 hover:bg-zinc-800 text-[11px] py-1 px-2 rounded text-left truncate text-zinc-300"
+                            >
+                                🏇 Hình yên ngựa (Saddle)
+                            </button>
+                            <button
+                                onclick="setModalTemplate('cos(x) + sin(y)')"
+                                class="bg-zinc-800/60 hover:bg-zinc-800 text-[11px] py-1 px-2 rounded text-left truncate text-zinc-300"
+                            >
+                                🧬 Sóng giao nhau (Interfere)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div
+                    class="bg-zinc-900/60 px-5 py-3 flex justify-end space-x-2 border-t border-zinc-800"
+                >
+                    <button
+                        onclick="closeFormulaModal()"
+                        class="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white px-4 py-2 rounded text-xs transition"
+                    >
+                        Hủy bỏ
+                    </button>
+                    <button
+                        onclick="generateMathSurfaceFromModal()"
+                        class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded text-xs font-bold transition flex items-center space-x-1.5"
+                    >
+                        <i class="fa-solid fa-plus"></i> <span>Tạo Đồ Thị</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Core Engine Scripts -->
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js"></script>
+
+        <script>
+            let scene, camera, renderer, orbitControls, transformControls;
+            let gridHelper, axesHelper;
+
+            // Arrays & Map to hold user-created meshes and custom properties
+            let sceneObjects = [];
+            let selectedObject = null;
+            let objectIdCounter = 0;
+
+            // Raycasting for object selection
+            const raycaster = new THREE.Raycaster();
+            const mousePoint = new THREE.Vector2();
+
+            // Color presets
+            const PRESET_COLORS = [
+                "#3b82f6",
+                "#10b981",
+                "#f59e0b",
+                "#ef4444",
+                "#ec4899",
+                "#8b5cf6",
+            ];
+
+            // Initialize Three.js scene
+            window.onload = function () {
+                initEngine();
+                animate();
+
+                // Add a couple of initial objects like Unity / GeoGebra templates
+                addInitialObjects();
+
+                // Add Keyboard listeners for shortcuts
+                setupKeyboardShortcuts();
+            };
+
+            function initEngine() {
+                const container = document.getElementById("canvas-container");
+                const rect = container.getBoundingClientRect();
+
+                // Create scene with soft environment background
+                scene = new THREE.Scene();
+                scene.background = new THREE.Color("#0c0c0e");
+                scene.fog = new THREE.FogExp2("#0c0c0e", 0.015);
+
+                // Setup camera with default orbit angles
+                camera = new THREE.PerspectiveCamera(
+                    45,
+                    rect.width / rect.height,
+                    0.1,
+                    1000,
+                );
+                camera.position.set(12, 12, 18);
+
+                // WebGL Renderer Setup with Shadow Mapping & High Precision Colors
+                renderer = new THREE.WebGLRenderer({
+                    antialias: true,
+                    powerPreference: "high-performance",
+                });
+                renderer.setSize(rect.width, rect.height);
+                renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+                renderer.shadowMap.enabled = true;
+                renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+                container.appendChild(renderer.domElement);
+
+                // Lighting Setup - High-end premium setup (ambient, directional with shadows, point fill)
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+                scene.add(ambientLight);
+
+                const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                dirLight.position.set(15, 25, 15);
+                dirLight.castShadow = true;
+                dirLight.shadow.mapSize.width = 2048;
+                dirLight.shadow.mapSize.height = 2048;
+                dirLight.shadow.camera.near = 0.5;
+                dirLight.shadow.camera.far = 100;
+                const d = 15;
+                dirLight.shadow.camera.left = -d;
+                dirLight.shadow.camera.right = d;
+                dirLight.shadow.camera.top = d;
+                dirLight.shadow.camera.bottom = -d;
+                dirLight.shadow.bias = -0.0005;
+                scene.add(dirLight);
+
+                const fillLight = new THREE.PointLight(0x6366f1, 0.6, 30);
+                fillLight.position.set(-10, 5, -10);
+                scene.add(fillLight);
+
+                // Helpers: Grid & XYZ Axes like GeoGebra
+                gridHelper = new THREE.GridHelper(50, 50, 0x4338ca, 0x27272a);
+                gridHelper.position.y = -0.01; // Avoid flickering with plane coordinates
+                scene.add(gridHelper);
+
+                // RGB color coded custom axes helper (X=Red, Y=Green, Z=Blue)
+                axesHelper = new THREE.AxesHelper(15);
+                // Thick lines for GeoGebra visual clarity
+                axesHelper.material.linewidth = 3;
+                axesHelper.material.renderOrder = 1;
+                scene.add(axesHelper);
+
+                // Orbit Controls setup
+                orbitControls = new THREE.OrbitControls(
+                    camera,
+                    renderer.domElement,
+                );
+                orbitControls.enableDamping = true;
+                orbitControls.dampingFactor = 0.05;
+                orbitControls.maxPolarAngle = Math.PI / 2 + 0.1; // Limit camera from going deep underground
+                orbitControls.minDistance = 2;
+                orbitControls.maxDistance = 100;
+
+                // Gizmo Transform Controls (Move / Rotate / Scale tool)
+                transformControls = new THREE.TransformControls(
+                    camera,
+                    renderer.domElement,
+                );
+                transformControls.addEventListener("change", () =>
+                    renderer.render(scene, camera),
+                );
+                transformControls.addEventListener(
+                    "dragging-changed",
+                    function (event) {
+                        // Disable Orbit Camera rotating while adjusting Transform Gizmo
+                        orbitControls.enabled = !event.value;
+                    },
+                );
+                scene.add(transformControls);
+
+                // Detect modification of selected objects via the Gizmo
+                transformControls.addEventListener("objectChange", function () {
+                    if (selectedObject) {
+                        // Update the UI fields coordinates in realtime as gizmo drags
+                        updateInspectorCoordinates(selectedObject);
+                    }
+                });
+
+                // Handle viewport resize dynamically
+                window.addEventListener("resize", onWindowResize);
+
+                // Handle object selection via Canvas Click/Double-click
+                container.addEventListener("dblclick", onCanvasDoubleClick);
+            }
+
+            // Animation loop
+            function animate() {
+                requestAnimationFrame(animate);
+                orbitControls.update();
+                renderer.render(scene, camera);
+            }
+
+            // Resizer callback
+            function onWindowResize() {
+                const container = document.getElementById("canvas-container");
+                const rect = container.getBoundingClientRect();
+                camera.aspect = rect.width / rect.height;
+                camera.updateProjectionMatrix();
+                renderer.setSize(rect.width, rect.height);
+            }
+
+            // Reset view helper
+            function resetCamera() {
+                camera.position.set(12, 12, 18);
+                orbitControls.target.set(0, 0, 0);
+                orbitControls.update();
+            }
+
+            // Toggle Helpers
+            function toggleGrid() {
+                gridHelper.visible = !gridHelper.visible;
+                const btn = document.getElementById("toggle-grid");
+                if (gridHelper.visible) {
+                    btn.classList.add("text-indigo-400");
+                    btn.classList.remove("text-zinc-500");
+                } else {
+                    btn.classList.remove("text-indigo-400");
+                    btn.classList.add("text-zinc-500");
+                }
+            }
+
+            function toggleAxes() {
+                axesHelper.visible = !axesHelper.visible;
+                const btn = document.getElementById("toggle-axes");
+                if (axesHelper.visible) {
+                    btn.classList.add("text-indigo-400");
+                    btn.classList.remove("text-zinc-500");
+                } else {
+                    btn.classList.remove("text-indigo-400");
+                    btn.classList.add("text-zinc-500");
+                }
+            }
+
+            function toggleShadows() {
+                renderer.shadowMap.enabled = !renderer.shadowMap.enabled;
+                // Traverse scene to force material recompile
+                scene.traverse(function (node) {
+                    if (node.isMesh) {
+                        node.castShadow = renderer.shadowMap.enabled;
+                        node.receiveShadow = renderer.shadowMap.enabled;
+                        if (node.material) node.material.needsUpdate = true;
+                    }
+                });
+                const btn = document.getElementById("toggle-shadows");
+                if (renderer.shadowMap.enabled) {
+                    btn.classList.add("text-indigo-400");
+                    btn.classList.remove("text-zinc-500");
+                } else {
+                    btn.classList.remove("text-indigo-400");
+                    btn.classList.add("text-zinc-500");
+                }
+            }
+
+            // Setup initial geometric scene setup
+            function addInitialObjects() {
+                // Add a beautiful central sphere and dynamic cube setup
+                const initialSphere = createMeshInstance("sphere", "#3b82f6");
+                initialSphere.position.set(0, 2, 0);
+                initialSphere.customProperties.name = "Central Sphere";
+                scene.add(initialSphere);
+                sceneObjects.push(initialSphere);
+
+                const initialGridFloor = createMeshInstance("plane", "#27272a");
+                initialGridFloor.position.set(0, 0, 0);
+                initialGridFloor.rotation.x = -Math.PI / 2;
+                initialGridFloor.scale.set(30, 30, 1);
+                initialGridFloor.customProperties.name = "Ground Anchor";
+                scene.add(initialGridFloor);
+                sceneObjects.push(initialGridFloor);
+
+                updateHierarchy();
+            }
+
+            // Helper: Generate Three Mesh geometries based on primitive type
+            function createMeshInstance(type, colorHex) {
+                let geometry, material;
+                const matColor =
+                    colorHex ||
+                    PRESET_COLORS[
+                        Math.floor(Math.random() * PRESET_COLORS.length)
+                    ];
+
+                // Choose geometric layout
+                switch (type) {
+                    case "point":
+                        // In 3D engine, points can be visualized as tiny sphere meshes
+                        geometry = new THREE.SphereGeometry(0.2, 16, 16);
+                        break;
+                    case "segment":
+                        // A line segment representation via thin long cylinder
+                        geometry = new THREE.CylinderGeometry(0.05, 0.05, 4, 8);
+                        break;
+                    case "cube":
+                        geometry = new THREE.BoxGeometry(2, 2, 2);
+                        break;
+                    case "sphere":
+                        geometry = new THREE.SphereGeometry(1.5, 32, 32);
+                        break;
+                    case "cylinder":
+                        geometry = new THREE.CylinderGeometry(1, 1, 3, 32);
+                        break;
+                    case "cone":
+                        geometry = new THREE.ConeGeometry(1, 3, 32);
+                        break;
+                    case "plane":
+                        geometry = new THREE.PlaneGeometry(5, 5);
+                        break;
+                }
+
+                // Create physically shaded material
+                material = new THREE.MeshStandardMaterial({
+                    color: matColor,
+                    roughness: 0.3,
+                    metalness: 0.1,
+                    side: THREE.DoubleSide,
+                });
+
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+
+                // Generate unique user identifier metadata properties
+                objectIdCounter++;
+                mesh.customProperties = {
+                    id: objectIdCounter,
+                    type: type,
+                    name: `${type.toUpperCase()} #${objectIdCounter}`,
+                    color: matColor,
+                    materialType: "standard",
+                    mathFormula: null, // Reserved for surface graphs
+                };
+
+                return mesh;
+            }
+
+            // Action wrapper for buttons
+            function addObject(type) {
+                const newObj = createMeshInstance(type);
+
+                // Random default placements near origin to look organic
+                if (type !== "plane") {
+                    newObj.position.set(
+                        (Math.random() - 0.5) * 6,
+                        type === "point" ? Math.random() * 4 : 1.5,
+                        (Math.random() - 0.5) * 6,
+                    );
+                } else {
+                    newObj.position.set(0, 0.01, 0);
+                    newObj.rotation.x = -Math.PI / 2;
+                }
+
+                scene.add(newObj);
+                sceneObjects.push(newObj);
+
+                updateHierarchy();
+                selectObject(newObj);
+            }
+
+            // Selection Handler (Dbl Click on canvas objects)
+            function onCanvasDoubleClick(event) {
+                event.preventDefault();
+
+                const container = document.getElementById("canvas-container");
+                const rect = container.getBoundingClientRect();
+
+                // Calculate mouse position normalized coordinates
+                mousePoint.x =
+                    ((event.clientX - rect.left) / rect.width) * 2 - 1;
+                mousePoint.y =
+                    -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+                raycaster.setFromCamera(mousePoint, camera);
+
+                // Filter out internal helpers from being raycast clicked
+                const targets = sceneObjects;
+                const intersects = raycaster.intersectObjects(targets, true);
+
+                if (intersects.length > 0) {
+                    // Pick closest clicked mesh
+                    let hitMesh = intersects[0].object;
+
+                    // Climb up if it's nested (though we have flat meshes here)
+                    while (
+                        hitMesh.parent &&
+                        hitMesh.parent !== scene &&
+                        !hitMesh.customProperties
+                    ) {
+                        hitMesh = hitMesh.parent;
+                    }
+
+                    if (hitMesh.customProperties) {
+                        selectObject(hitMesh);
+                    }
+                } else {
+                    // If user double clicked into empty space, deselect current
+                    deselectAll();
+                }
+            }
+
+            function selectObject(obj) {
+                selectedObject = obj;
+
+                // Attach Transform Control Gizmo
+                transformControls.attach(obj);
+
+                // Highlight selected object in Hierarchy UI
+                document.querySelectorAll(".hierarchy-item").forEach((el) => {
+                    el.classList.remove(
+                        "bg-indigo-600/30",
+                        "border-indigo-500",
+                    );
+                    el.classList.add("bg-[#1e1e24]", "border-[#2d2d34]");
+                });
+                const selectedItemEl = document.getElementById(
+                    `hierarchy-item-${obj.customProperties.id}`,
+                );
+                if (selectedItemEl) {
+                    selectedItemEl.classList.remove(
+                        "bg-[#1e1e24]",
+                        "border-[#2d2d34]",
+                    );
+                    selectedItemEl.classList.add(
+                        "bg-indigo-600/30",
+                        "border-indigo-500",
+                    );
+                }
+
+                // Populate inspector data
+                document
+                    .getElementById("inspector-empty")
+                    .classList.add("hidden");
+                const contentPanel =
+                    document.getElementById("inspector-content");
+                contentPanel.classList.remove("hidden");
+
+                // Set inputs
+                document.getElementById("obj-name").value =
+                    obj.customProperties.name;
+                document.getElementById("obj-color").value =
+                    obj.customProperties.color;
+                document.getElementById("obj-color-hex").innerText =
+                    obj.customProperties.color;
+                document.getElementById("obj-material").value =
+                    obj.customProperties.materialType;
+
+                updateInspectorCoordinates(obj);
+
+                // Check if selected object is a GeoGebra Math surface
+                const formulaPanel = document.getElementById(
+                    "math-formula-inspector",
+                );
+                if (obj.customProperties.type === "surface") {
+                    formulaPanel.classList.remove("hidden");
+                    document.getElementById("math-formula-input").value =
+                        obj.customProperties.mathFormula;
+                } else {
+                    formulaPanel.classList.add("hidden");
+                }
+            }
+
+            function deselectAll() {
+                selectedObject = null;
+                transformControls.detach();
+
+                document.querySelectorAll(".hierarchy-item").forEach((el) => {
+                    el.classList.remove(
+                        "bg-indigo-600/30",
+                        "border-indigo-500",
+                    );
+                    el.classList.add("bg-[#1e1e24]", "border-[#2d2d34]");
+                });
+
+                document
+                    .getElementById("inspector-content")
+                    .classList.add("hidden");
+                document
+                    .getElementById("inspector-empty")
+                    .classList.remove("hidden");
+            }
+
+            // Sync mesh positions to UI form inputs
+            function updateInspectorCoordinates(obj) {
+                document.getElementById("pos-x").value =
+                    obj.position.x.toFixed(2);
+                document.getElementById("pos-y").value =
+                    obj.position.y.toFixed(2);
+                document.getElementById("pos-z").value =
+                    obj.position.z.toFixed(2);
+
+                // Convert radians back to angles for human readability
+                document.getElementById("rot-x").value = Math.round(
+                    obj.rotation.x * (180 / Math.PI),
+                );
+                document.getElementById("rot-y").value = Math.round(
+                    obj.rotation.y * (180 / Math.PI),
+                );
+                document.getElementById("rot-z").value = Math.round(
+                    obj.rotation.z * (180 / Math.PI),
+                );
+
+                document.getElementById("scale-x").value =
+                    obj.scale.x.toFixed(2);
+                document.getElementById("scale-y").value =
+                    obj.scale.y.toFixed(2);
+                document.getElementById("scale-z").value =
+                    obj.scale.z.toFixed(2);
+            }
+
+            // Sync UI form inputs back to selected mesh
+            function updateSelectedProperties() {
+                if (!selectedObject) return;
+
+                // Name & Color
+                const newName = document.getElementById("obj-name").value;
+                selectedObject.customProperties.name =
+                    newName || `Obj_${selectedObject.customProperties.id}`;
+
+                // Sync hierarchy element label text in realtime
+                const labelSpan = document.querySelector(
+                    `#hierarchy-item-${selectedObject.customProperties.id} .item-name`,
+                );
+                if (labelSpan)
+                    labelSpan.innerText = selectedObject.customProperties.name;
+
+                const newColor = document.getElementById("obj-color").value;
+                selectedObject.customProperties.color = newColor;
+                document.getElementById("obj-color-hex").innerText = newColor;
+                selectedObject.material.color.set(newColor);
+
+                // Material wireframe / shading type
+                const matType = document.getElementById("obj-material").value;
+                selectedObject.customProperties.materialType = matType;
+
+                if (matType === "wireframe") {
+                    selectedObject.material.wireframe = true;
+                } else {
+                    selectedObject.material.wireframe = false;
+                    if (matType === "phong") {
+                        // Update to polished material
+                        selectedObject.material.roughness = 0.05;
+                        selectedObject.material.metalness = 0.9;
+                    } else {
+                        // Back to standard solid
+                        selectedObject.material.roughness = 0.3;
+                        selectedObject.material.metalness = 0.1;
+                    }
+                }
+                selectedObject.material.needsUpdate = true;
+
+                // Translate Position numbers
+                selectedObject.position.x =
+                    parseFloat(document.getElementById("pos-x").value) || 0;
+                selectedObject.position.y =
+                    parseFloat(document.getElementById("pos-y").value) || 0;
+                selectedObject.position.z =
+                    parseFloat(document.getElementById("pos-z").value) || 0;
+
+                // Rotate Angles to Radians conversion
+                const rx =
+                    parseFloat(document.getElementById("rot-x").value) || 0;
+                const ry =
+                    parseFloat(document.getElementById("rot-y").value) || 0;
+                const rz =
+                    parseFloat(document.getElementById("rot-z").value) || 0;
+                selectedObject.rotation.set(
+                    rx * (Math.PI / 180),
+                    ry * (Math.PI / 180),
+                    rz * (Math.PI / 180),
+                );
+
+                // Scale coordinates
+                selectedObject.scale.x =
+                    parseFloat(document.getElementById("scale-x").value) || 0.1;
+                selectedObject.scale.y =
+                    parseFloat(document.getElementById("scale-y").value) || 0.1;
+                selectedObject.scale.z =
+                    parseFloat(document.getElementById("scale-z").value) || 0.1;
+
+                renderer.render(scene, camera);
+            }
+
+            // Re-render HTML representation of hierarchy tree
+            function updateHierarchy() {
+                const listContainer = document.getElementById("hierarchy-list");
+                const emptyMsg = document.getElementById("empty-hierarchy-msg");
+                const counter = document.getElementById("object-counter");
+
+                counter.innerText = sceneObjects.length;
+
+                if (sceneObjects.length === 0) {
+                    emptyMsg.classList.remove("hidden");
+                    return;
+                } else {
+                    emptyMsg.classList.add("hidden");
+                }
+
+                // Save currently focused selected id
+                const currentSelectedId = selectedObject
+                    ? selectedObject.customProperties.id
+                    : null;
+
+                listContainer.innerHTML = "";
+
+                sceneObjects.forEach((obj) => {
+                    const item = document.createElement("div");
+                    item.id = `hierarchy-item-${obj.customProperties.id}`;
+
+                    // Color highlight logic
+                    const isActive =
+                        currentSelectedId === obj.customProperties.id;
+                    const borderClass = isActive
+                        ? "border-indigo-500"
+                        : "border-[#2d2d34]";
+                    const bgClass = isActive
+                        ? "bg-indigo-600/30"
+                        : "bg-[#1e1e24] hover:bg-[#25252d]";
+
+                    let icon = '<i class="fa-solid fa-cube text-blue-400"></i>';
+                    if (obj.customProperties.type === "point")
+                        icon =
+                            '<span class="w-2.5 h-2.5 rounded-full bg-red-500 inline-block"></span>';
+                    if (obj.customProperties.type === "segment")
+                        icon =
+                            '<i class="fa-solid fa-arrows-alt-h text-yellow-500"></i>';
+                    if (obj.customProperties.type === "sphere")
+                        icon =
+                            '<i class="fa-solid fa-circle text-green-400"></i>';
+                    if (obj.customProperties.type === "cylinder")
+                        icon =
+                            '<i class="fa-solid fa-database text-purple-400"></i>';
+                    if (obj.customProperties.type === "cone")
+                        icon =
+                            '<i class="fa-solid fa-triangle-exclamation text-orange-400"></i>';
+                    if (obj.customProperties.type === "plane")
+                        icon =
+                            '<i class="fa-solid fa-square-full text-pink-400 text-[9px]"></i>';
+                    if (obj.customProperties.type === "surface")
+                        icon =
+                            '<i class="fa-solid fa-chart-area text-indigo-400"></i>';
+
+                    item.className = `hierarchy-item flex items-center justify-between p-2.5 rounded border ${borderClass} ${bgClass} cursor-pointer transition mb-1.5`;
+
+                    // Action bindings
+                    item.onclick = (e) => {
+                        e.stopPropagation();
+                        selectObject(obj);
+                    };
+
+                    item.innerHTML = `
+                    <div class="flex items-center space-x-2.5 truncate">
+                        ${icon}
+                        <span class="item-name text-xs font-medium text-white truncate">${obj.customProperties.name}</span>
+                    </div>
+                    <div class="flex items-center space-x-1.5">
+                        <button onclick="toggleMeshVisibility(${obj.customProperties.id}, event)" class="p-1 hover:text-white text-zinc-500 transition" title="Ẩn/Hiện">
+                            <i class="fa-regular ${obj.visible ? "fa-eye" : "fa-eye-slash"} id-vis-${obj.customProperties.id}"></i>
+                        </button>
+                        <button onclick="deleteObjectById(${obj.customProperties.id}, event)" class="p-1 hover:text-red-400 text-zinc-500 transition" title="Xóa">
+                            <i class="fa-regular fa-trash-can"></i>
+                        </button>
+                    </div>
+                `;
+
+                    listContainer.appendChild(item);
+                });
+            }
+
+            // Toggle mesh render state
+            function toggleMeshVisibility(id, event) {
+                if (event) event.stopPropagation();
+                const targetMesh = sceneObjects.find(
+                    (o) => o.customProperties.id === id,
+                );
+                if (targetMesh) {
+                    targetMesh.visible = !targetMesh.visible;
+                    if (
+                        selectedObject &&
+                        selectedObject.customProperties.id === id
+                    ) {
+                        if (!targetMesh.visible) transformControls.detach();
+                        else transformControls.attach(targetMesh);
+                    }
+                    const icon = document.querySelector(`.id-vis-${id}`);
+                    if (icon) {
+                        icon.className = `fa-regular ${targetMesh.visible ? "fa-eye" : "fa-eye-slash"} id-vis-${id}`;
+                    }
+                }
+            }
+
+            // Delete Object
+            function deleteSelectedObject() {
+                if (selectedObject) {
+                    deleteObjectById(selectedObject.customProperties.id);
+                }
+            }
+
+            function deleteObjectById(id, event) {
+                if (event) event.stopPropagation();
+
+                const index = sceneObjects.findIndex(
+                    (o) => o.customProperties.id === id,
+                );
+                if (index > -1) {
+                    const obj = sceneObjects[index];
+
+                    if (
+                        selectedObject &&
+                        selectedObject.customProperties.id === id
+                    ) {
+                        deselectAll();
+                    }
+
+                    scene.remove(obj);
+                    // Dispose buffers to clean WebGL memory safely
+                    if (obj.geometry) obj.geometry.dispose();
+                    if (obj.material) {
+                        if (Array.isArray(obj.material))
+                            obj.material.forEach((m) => m.dispose());
+                        else obj.material.dispose();
+                    }
+
+                    sceneObjects.splice(index, 1);
+                    updateHierarchy();
+                    renderer.render(scene, camera);
+                }
+            }
+
+            // Control Gizmo type settings
+            function setGizmoMode(mode) {
+                const btns = {
+                    select: document.getElementById("tool-select"),
+                    translate: document.getElementById("tool-translate"),
+                    rotate: document.getElementById("tool-rotate"),
+                    scale: document.getElementById("tool-scale"),
+                };
+
+                // Reset styles
+                Object.values(btns).forEach((b) => {
+                    b.classList.remove("bg-[#3b82f6]", "text-white");
+                    b.classList.add("text-gray-400", "hover:text-white");
+                });
+
+                if (mode === "select") {
+                    btns.select.classList.remove("text-gray-400");
+                    btns.select.classList.add("bg-[#3b82f6]", "text-white");
+                    transformControls.detach(); // Hide gizmo
+                } else {
+                    btns[mode].classList.remove("text-gray-400");
+                    btns[mode].classList.add("bg-[#3b82f6]", "text-white");
+                    transformControls.setMode(mode);
+                    if (selectedObject) {
+                        transformControls.attach(selectedObject);
+                    }
+                }
+            }
+
+            // Dialog Modal helpers
+            function openFormulaModal() {
+                document
+                    .getElementById("math-modal")
+                    .classList.remove("hidden");
+            }
+
+            function closeFormulaModal() {
+                document.getElementById("math-modal").classList.add("hidden");
+            }
+
+            function setModalTemplate(formula) {
+                document.getElementById("modal-formula").value = formula;
+            }
+
+            // Generate customized GeoGebra Mathematical Surfaces from inputs safely
+            function generateMathSurfaceFromModal() {
+                const formulaStr =
+                    document.getElementById("modal-formula").value;
+                const range =
+                    parseFloat(document.getElementById("modal-range").value) ||
+                    10;
+                const segments =
+                    parseInt(document.getElementById("modal-segments").value) ||
+                    40;
+
+                const mesh = createMathSurfaceMesh(formulaStr, range, segments);
+                if (mesh) {
+                    scene.add(mesh);
+                    sceneObjects.push(mesh);
+                    updateHierarchy();
+                    selectObject(mesh);
+                    closeFormulaModal();
+                }
+            }
+
+            // Creating dynamic mathematical Parametric Function Meshes
+            function createMathSurfaceMesh(formula, range, segments) {
+                // Safe parser: converting standard formulas to raw JavaScript Math equivalents
+                let jsExpr = formula
+                    .toLowerCase()
+                    .replace(/sin/g, "Math.sin")
+                    .replace(/cos/g, "Math.cos")
+                    .replace(/tan/g, "Math.tan")
+                    .replace(/sqrt/g, "Math.sqrt")
+                    .replace(/abs/g, "Math.abs")
+                    .replace(/pi/g, "Math.PI")
+                    .replace(/\^/g, "**");
+
+                // Construct safe local scope execution script
+                let evalFunc;
+                try {
+                    evalFunc = new Function(
+                        "x",
+                        "y",
+                        `try { return ${jsExpr}; } catch(e) { return 0; }`,
+                    );
+                    // Test run with dummy variables
+                    evalFunc(1, 1);
+                } catch (err) {
+                    alert(
+                        "Công thức nhập vào không hợp lệ hoặc sai cú pháp toán học!",
+                    );
+                    return null;
+                }
+
+                // Dilation variables
+                const halfRange = range / 2;
+
+                // Generate geometry vertices grid
+                const geometry = new THREE.PlaneGeometry(
+                    range,
+                    range,
+                    segments,
+                    segments,
+                );
+                const positions = geometry.attributes.position;
+
+                for (let i = 0; i < positions.count; i++) {
+                    // Plane mesh originally generates coordinates on local flat grid X & Y
+                    const x = positions.getX(i);
+                    const y = positions.getY(i);
+
+                    // Solve mathematical Z-elevation
+                    let z = evalFunc(x, y);
+
+                    // Handle imaginary number fallbacks (e.g. division by zero, square root of negative)
+                    if (isNaN(z) || !isFinite(z)) {
+                        z = 0;
+                    }
+
+                    // In Three.js standard planes, Z axis points outwards towards screen, we elevate vertex Y or Z
+                    // We will map 2D coordinates (X, Y) -> 3D values.
+                    // Let's modify local depth coordinate so it scales beautifully
+                    positions.setZ(i, z);
+                }
+
+                geometry.computeVertexNormals();
+
+                // Indigo colored shiny double-sided mesh to represent premium GeoGebra graphs
+                const material = new THREE.MeshStandardMaterial({
+                    color: "#6366f1",
+                    roughness: 0.15,
+                    metalness: 0.2,
+                    side: THREE.DoubleSide,
+                    flatShading: false,
+                });
+
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+
+                // Align flat geometry standard plane horizontally relative to Three Scene ground
+                mesh.rotation.x = -Math.PI / 2;
+                mesh.position.set(0, 1, 0);
+
+                objectIdCounter++;
+                mesh.customProperties = {
+                    id: objectIdCounter,
+                    type: "surface",
+                    name: `Đồ thị Math #${objectIdCounter}`,
+                    color: "#6366f1",
+                    materialType: "standard",
+                    mathFormula: formula,
+                    mathRange: range,
+                    mathSegments: segments,
+                };
+
+                return mesh;
+            }
+
+            // Re-generate surface when editing properties inside the Inspector Panel directly
+            function updateMathSurfaceFormula() {
+                if (
+                    !selectedObject ||
+                    selectedObject.customProperties.type !== "surface"
+                )
+                    return;
+
+                const newFormula =
+                    document.getElementById("math-formula-input").value;
+                const range = selectedObject.customProperties.mathRange || 10;
+                const segments =
+                    selectedObject.customProperties.mathSegments || 40;
+
+                // Generate temporary fresh mesh geometry
+                const tempMesh = createMathSurfaceMesh(
+                    newFormula,
+                    range,
+                    segments,
+                );
+                if (tempMesh) {
+                    // Update parent geometry vertex parameters in place
+                    selectedObject.geometry.dispose();
+                    selectedObject.geometry = tempMesh.geometry;
+                    selectedObject.customProperties.mathFormula = newFormula;
+
+                    // Clear temp memory buffer immediately
+                    tempMesh.material.dispose();
+
+                    renderer.render(scene, camera);
+                }
+            }
+
+            // Hotkey bindings
+            function setupKeyboardShortcuts() {
+                window.addEventListener("keydown", function (event) {
+                    // Ignore keyboard events if user is actively editing names or typing coordinate inputs
+                    if (
+                        document.activeElement.tagName === "INPUT" ||
+                        document.activeElement.tagName === "SELECT"
+                    ) {
+                        return;
+                    }
+
+                    switch (event.key.toLowerCase()) {
+                        case "q":
+                            setGizmoMode("select");
+                            break;
+                        case "w":
+                            setGizmoMode("translate");
+                            break;
+                        case "e":
+                            setGizmoMode("rotate");
+                            break;
+                        case "r":
+                            setGizmoMode("scale");
+                            break;
+                        case "delete":
+                        case "backspace":
+                            deleteSelectedObject();
+                            break;
+                        case "escape":
+                            deselectAll();
+                            break;
+                    }
+                });
+            }
+        </script>
+    </body>
+</html>

@@ -12,7 +12,6 @@ import {
 import { type Bounds } from '../../domains/calibration';
 
 export type EditorView = 'editor' | 'bake';
-export type CameraMode = 'orbit' | 'fly';
 
 export function useEditorScene({
   sourcePath,
@@ -24,7 +23,6 @@ export function useEditorScene({
   bounds: Bounds | null;
 }) {
   const [activeView, setActiveView] = useLocalStorage<EditorView>('ag_editor_active_view', 'bake');
-  const [cameraMode, setCameraMode] = useLocalStorage<CameraMode>('ag_editor_camera_mode', 'orbit');
   const [visible, setVisible] = useLocalStorage<boolean>('ag_editor_scene_visible', true);
   const [deleted, setDeleted] = useLocalStorage<boolean>('ag_editor_scene_deleted', false);
   const [transform, setTransform] =
@@ -77,8 +75,6 @@ export function useEditorScene({
   return {
     activeView,
     setActiveView,
-    cameraMode,
-    setCameraMode,
     visible,
     setVisible,
     deleted,

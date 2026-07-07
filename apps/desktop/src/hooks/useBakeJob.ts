@@ -22,8 +22,8 @@ export function useBakeJob({
   status: string;
   setStatus: (s: string) => void;
   inputPath: string;
-  recipe: any;
-  config: any;
+  recipe: unknown;
+  config: unknown;
   isCalibrationValid: boolean;
   prepareBakeSource?: () => Promise<PreparedBakeSource>;
 }) {

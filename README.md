@@ -4,7 +4,7 @@
 
 ## Current Build
 
-This repository is now a Cargo workspace with:
+Workspace layout:
 
 - `crates/core-lib`: Rust processing core
 - `crates/cli`: `augmented-gaussian-cli`
@@ -125,7 +125,7 @@ Config may also select reconstruction:
 }
 ```
 
-For `"method": "sugar"` or `"method": "poisson"`, `adapterCommand` must launch a process that reads request JSON from stdin and writes response JSON to stdout:
+For `"method": "sugar"` or `"method": "poisson"`, `adapterCommand` launches a process that reads request JSON from stdin and writes response JSON to stdout:
 
 ```json
 {
@@ -134,7 +134,7 @@ For `"method": "sugar"` or `"method": "poisson"`, `adapterCommand` must launch a
 }
 ```
 
-The mesh JSON must use the existing collision mesh schema: `vertices`, `indices`, and `triangles_before_merge`. The adapter output path is rejected if it is outside the resolved output directory. For strict filesystem sandboxing of third-party adapters, run the adapter command through an OS/container sandbox wrapper.
+The mesh JSON uses the existing collision mesh schema: `vertices`, `indices`, and `triangles_before_merge`. The adapter output path is rejected if it is outside the resolved output directory. For filesystem sandboxing of third-party adapters, run the adapter command through an OS/container sandbox wrapper.
 
 Example adapter environments:
 

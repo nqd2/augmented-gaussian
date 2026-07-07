@@ -8,23 +8,25 @@ import {
   type Bounds,
 } from '../domains/calibration';
 import { type Point3, type UpAxis } from '../domains/calibration';
-import { parseSplatColumns, splatColumnsToPlyElements } from '../utils/splatPreview';
+import { splatColumnsToPlyElements, type ParsedSplatColumns } from '../utils/splatPreview';
 import { defaultSceneTransform, type SceneTransform } from '../domains/editor/sceneTransform';
-import { type CameraMode } from './CameraController';
 
 export type ViewerLoadProgress = {
   loaded: number;
   total: number | null;
   percent: number | null;
+  phase?: 'download' | 'decode' | 'build';
 };
 
 export type ViewerSourceSummary = {
   splatCount: number;
+  previewSplatCount?: number;
   bounds: Bounds;
 };
 
 export type LoadSplatOptions = {
   bounds?: Bounds;
+  previewMaxSplats?: number | null;
   onProgress?: (progress: ViewerLoadProgress) => void;
   onReady?: (summary: ViewerSourceSummary) => void;
   onError?: (error: Error) => void;
@@ -40,6 +42,8 @@ export class PlayCanvasViewer {
   private gsplatResource: any = null;
   private loadToken = 0;
   private loadAbort: AbortController | null = null;
+  private splatDecodeWorker: Worker | null = null;
+  private splatDecodeReject: ((error: Error) => void) | null = null;
 
   private scalePoints: [Point3, Point3] = [[0, 0, 0], [0, 0, 0]];
   private bounds?: Bounds;
@@ -106,7 +110,9 @@ export class PlayCanvasViewer {
   }
 
   private updateAlignmentTransform() {
-    this.alignmentRotation.copy(pc.Quat.IDENTITY);
+    const sourceUp = toPcVec(upAxisVector(this.upAxis));
+    const targetUp = new pc.Vec3(0, 1, 0);
+    this.alignmentRotation.copy(getRotationBetween(sourceUp, targetUp));
     if (!this.gsplatEntity) return;
 
     const manualRotation = sceneTransformRotation(this.sceneTransform);
@@ -120,10 +126,6 @@ export class PlayCanvasViewer {
   public setSceneTransform(transform: SceneTransform) {
     this.sceneTransform = transform;
     this.updateAlignmentTransform();
-  }
-
-  public setCameraMode(mode: CameraMode) {
-    this.controller.setMode(mode);
   }
 
   public setSceneVisible(visible: boolean) {
@@ -176,6 +178,10 @@ export class PlayCanvasViewer {
   private clearSplat() {
     this.loadAbort?.abort();
     this.loadAbort = null;
+    this.splatDecodeWorker?.terminate();
+    this.splatDecodeWorker = null;
+    this.splatDecodeReject?.(abortError());
+    this.splatDecodeReject = null;
     if (this.gsplatEntity) {
       this.gsplatEntity.destroy();
       this.gsplatEntity = null;
@@ -204,7 +210,14 @@ export class PlayCanvasViewer {
       });
       if (this.loadToken !== token) return;
 
-      const parsed = parseSplatColumns(bytes);
+      options.onProgress?.(makeProgress(0, null, 'decode'));
+      const parsed = await this.decodeRawSplat(bytes, token, options.previewMaxSplats);
+      if (this.loadToken !== token) return;
+
+      options.onProgress?.(makeProgress(0, null, 'build'));
+      await nextFrame();
+      if (this.loadToken !== token) return;
+
       const gsplatData = new (pc as any).GSplatData(splatColumnsToPlyElements(parsed));
       const resource = new (pc as any).GSplatResource(this.app.graphicsDevice, gsplatData, {
         prepareCenters: true,
@@ -216,6 +229,10 @@ export class PlayCanvasViewer {
 
       this.gsplatResource = resource;
       const summary = sourceSummaryFromResource(resource, options.bounds);
+      if (parsed.sourceCount) {
+        summary.splatCount = parsed.sourceCount;
+        summary.previewSplatCount = parsed.count;
+      }
       this.attachGsplatResource(resource, summary.bounds);
       options.onReady?.(summary);
     } catch (err) {
@@ -227,6 +244,52 @@ export class PlayCanvasViewer {
         this.loadAbort = null;
       }
     }
+  }
+
+  private decodeRawSplat(
+    bytes: Uint8Array,
+    token: number,
+    maxPreviewSplats?: number | null,
+  ): Promise<ParsedSplatColumns> {
+    this.splatDecodeWorker?.terminate();
+    const worker = new Worker(new URL('../workers/splatDecode.worker.ts', import.meta.url), {
+      type: 'module',
+    });
+    this.splatDecodeWorker = worker;
+    const buffer = transferableBuffer(bytes);
+    const id = token;
+
+    return new Promise((resolve, reject) => {
+      worker.onmessage = (event: MessageEvent<DecodeWorkerResponse>) => {
+        const message = event.data;
+        if (message.id !== id) return;
+        worker.terminate();
+        if (this.splatDecodeWorker === worker) {
+          this.splatDecodeWorker = null;
+          this.splatDecodeReject = null;
+        }
+        if (message.type === 'decoded-splat') {
+          resolve(message.parsed);
+        } else {
+          reject(new Error(message.message));
+        }
+      };
+      worker.onerror = (event) => {
+        worker.terminate();
+        if (this.splatDecodeWorker === worker) {
+          this.splatDecodeWorker = null;
+          this.splatDecodeReject = null;
+        }
+        reject(new Error(event.message || 'failed to decode .splat in worker'));
+      };
+      this.splatDecodeReject = reject;
+      worker.postMessage({
+        type: 'decode-splat',
+        id,
+        buffer,
+        maxPreviewSplats,
+      } satisfies DecodeWorkerRequest, [buffer]);
+    });
   }
 
   private attachGsplatResource(resource: any, bounds?: Bounds) {
@@ -348,13 +411,52 @@ function isRawSplatUrl(url: string) {
   return url.split(/[?#]/, 1)[0].toLowerCase().endsWith('.splat');
 }
 
-function makeProgress(loaded: number, total: number | null): ViewerLoadProgress {
+type DecodeWorkerRequest = {
+  type: 'decode-splat';
+  id: number;
+  buffer: ArrayBuffer;
+  maxPreviewSplats?: number | null;
+};
+
+type DecodeWorkerResponse =
+  | { type: 'decoded-splat'; id: number; parsed: ParsedSplatColumns }
+  | { type: 'decode-error'; id: number; message: string };
+
+function makeProgress(
+  loaded: number,
+  total: number | null,
+  phase: ViewerLoadProgress['phase'] = 'download',
+): ViewerLoadProgress {
   const validTotal = total && Number.isFinite(total) && total > 0 ? total : null;
   return {
     loaded,
     total: validTotal,
     percent: validTotal ? Math.max(0, Math.min(100, (loaded / validTotal) * 100)) : null,
+    phase,
   };
+}
+
+function nextFrame() {
+  return new Promise<void>((resolve) => setTimeout(resolve, 50));
+}
+
+function transferableBuffer(bytes: Uint8Array): ArrayBuffer {
+  if (
+    bytes.buffer instanceof ArrayBuffer &&
+    bytes.byteOffset === 0 &&
+    bytes.byteLength === bytes.buffer.byteLength
+  ) {
+    return bytes.buffer;
+  }
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
+function abortError() {
+  const error = new Error('splat decode cancelled');
+  error.name = 'AbortError';
+  return error;
 }
 
 async function readResponseBytes(

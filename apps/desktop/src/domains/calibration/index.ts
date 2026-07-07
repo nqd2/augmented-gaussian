@@ -133,12 +133,7 @@ function makeReconstructionConfig(method: ReconstructionMethod, adapterCommand: 
   };
 }
 
-export function makeEditRecipe(
-  scalePoints: [Point3, Point3],
-  distance: number,
-  profile: GeometryProfile = defaultGeometryProfile,
-  upAxis: UpAxis = 'y',
-) {
+export function makeEditRecipe() {
   return {
     operations: [],
   };
@@ -170,7 +165,7 @@ export function makeAlignmentRecipe(
       scaleDistanceMeters: distance,
       origin: [0, 0, 0] as Point3,
     },
-    editRecipe: makeEditRecipe(scalePoints, distance, geometryProfile, upAxis),
+    editRecipe: makeEditRecipe(),
   };
 }
 
@@ -223,7 +218,6 @@ export function drawCalibrationOverlay(
   const center = new pc.Vec3(0, 0, 0);
   const upVec = toVec(upAxisVector(upAxis));
   
-  // Create an arbitrary orthogonal basis
   const fallback = Math.abs(upVec.y) < 0.9 ? new pc.Vec3(0, 1, 0) : new pc.Vec3(1, 0, 0);
   const basisU = fallback.sub(upVec.clone().mulScalar(fallback.dot(upVec))).normalize();
   const basisV = new pc.Vec3().cross(upVec, basisU).normalize();

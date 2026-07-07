@@ -29,7 +29,7 @@ async function routeMinimalSplat(page: import('@playwright/test').Page, repoRoot
 
 async function pickTarget(page: import('@playwright/test').Page, target: string, x: number, y: number) {
   await page.getByLabel('Pick Target').selectOption(target);
-  await page.locator('canvas.preview').click({ position: { x, y } });
+  await page.locator('canvas.preview').dblclick({ position: { x, y } });
 }
 
 test('GUI calibration flow serializes recipe and calls Tauri commands', async ({ page }) => {
@@ -90,6 +90,9 @@ test('GUI calibration flow serializes recipe and calls Tauri commands', async ({
     await expect(page.getByText('Splats')).toBeVisible();
 
     await page.getByLabel('Scale Calibration Distance').fill('3.25');
+    await page.getByLabel('Pick Target').selectOption('scale0');
+    await page.locator('canvas.preview').click({ position: { x: 140, y: 200 } });
+    await expect(page.getByLabel('Scale endpoints 1 x')).toHaveValue('0');
     await pickTarget(page, 'scale0', 180, 220);
     await pickTarget(page, 'scale1', 320, 220);
     await page.getByLabel('Scale endpoints 1 x').fill('0.1');
@@ -97,7 +100,7 @@ test('GUI calibration flow serializes recipe and calls Tauri commands', async ({
     await page.getByLabel('Up Axis').selectOption('z');
     await page.locator('#e2e-select-reconstruction-method').selectOption('sugar');
     await expect(page.getByRole('button', { name: 'Bake Geometry' })).toBeDisabled();
-    await expect(page.getByText('External reconstruction adapter command required.').first()).toBeVisible();
+    await expect(page.getByText('Adapter command required.').first()).toBeVisible();
     await page.getByLabel('Adapter Command').fill('run-sugar');
     await expect(page.getByRole('button', { name: 'Bake Geometry' })).toBeEnabled();
     await page.locator('#e2e-select-reconstruction-method').selectOption('voxel');
@@ -371,6 +374,182 @@ test('source loading keeps controls responsive and can be cancelled', async ({ p
     await expect(page.getByRole('button', { name: 'Cancel' })).toBeDisabled();
   } finally {
     releaseSplat();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test('source loading can be cancelled while raw splat decode is pending', async ({ page }) => {
+  const repoRoot = path.resolve(process.cwd(), '../..');
+  buildApp();
+
+  await page.addInitScript(() => {
+    let releaseDecode!: () => void;
+    const decodeRelease = new Promise<void>((resolve) => {
+      releaseDecode = resolve;
+    });
+    (window as any).__AG_RELEASE_DECODE__ = releaseDecode;
+    (window as any).__TAURI_INTERNALS__ = {
+      invoke: async (cmd: string, args: any) => {
+        if (cmd === 'plugin:event|listen') return 1;
+        if (cmd === 'plugin:event|unlisten') return true;
+        if (cmd === 'load_source') {
+          return { path: args.path, bytes: 128, format: 'splat', splatCount: 4 };
+        }
+        throw new Error(`unexpected command ${cmd}`);
+      },
+      transformCallback: () => 0,
+      unregisterCallback: () => {},
+      convertFileSrc: (filePath: string) => filePath,
+    };
+
+    const NativeWorker = window.Worker;
+    window.Worker = class extends NativeWorker {
+      private appOnMessage: ((event: MessageEvent) => void) | null = null;
+
+      constructor(url: string | URL, options?: WorkerOptions) {
+        super(url, options);
+        const isSplatDecodeWorker = String(url).includes('splatDecode.worker');
+        super.addEventListener('message', (event) => {
+          const deliver = () => this.appOnMessage?.(event);
+          if (isSplatDecodeWorker) {
+            void decodeRelease.then(deliver);
+          } else {
+            deliver();
+          }
+        });
+      }
+
+      get onmessage() {
+        return this.appOnMessage;
+      }
+
+      set onmessage(handler: ((event: MessageEvent) => void) | null) {
+        this.appOnMessage = handler;
+      }
+    };
+  });
+  await routeMinimalSplat(page, repoRoot);
+
+  const { server, url } = await serveDirectory(path.join(repoRoot, 'apps/desktop/dist'));
+  try {
+    await page.goto(`${url}/index.html`);
+    await page.getByLabel('Source PLY/SPLAT Path').fill('tests/fixtures/minimal.splat');
+    await page.getByRole('button', { name: 'Load' }).click();
+
+    await expect(page.getByText('decoding source', { exact: true }).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Cancel' })).toBeEnabled();
+
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    await expect(page.getByText('source load cancelled').first()).toBeVisible();
+    await expect(page.getByText('source loaded')).not.toBeVisible();
+
+    await page.evaluate(() => (window as any).__AG_RELEASE_DECODE__());
+    await expect(page.getByText('source loaded')).not.toBeVisible();
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test('large raw splat auto-uses downsampled preview without confirm dialog', async ({ page }) => {
+  const repoRoot = path.resolve(process.cwd(), '../..');
+  buildApp();
+
+  await page.addInitScript(() => {
+    (window as any).__AG_MAX_PREVIEW_SPLATS__ = null;
+    window.confirm = (message?: string) => {
+      throw new Error(`unexpected confirm: ${message ?? ''}`);
+    };
+    (window as any).__TAURI_INTERNALS__ = {
+      invoke: async (cmd: string, args: any) => {
+        if (cmd === 'plugin:event|listen') return 1;
+        if (cmd === 'plugin:event|unlisten') return true;
+        if (cmd === 'load_source') {
+          return { path: args.path, bytes: 32 * 600001, format: 'splat', splatCount: 600001 };
+        }
+        throw new Error(`unexpected command ${cmd}`);
+      },
+      transformCallback: () => 0,
+      unregisterCallback: () => {},
+      convertFileSrc: (filePath: string) => filePath,
+    };
+
+    const NativeWorker = window.Worker;
+    window.Worker = class extends NativeWorker {
+      postMessage(message: any, transfer: Transferable[]): void;
+      postMessage(message: any, options?: StructuredSerializeOptions): void;
+      postMessage(message: any, transferOrOptions?: Transferable[] | StructuredSerializeOptions) {
+        if (message?.type === 'decode-splat') {
+          (window as any).__AG_MAX_PREVIEW_SPLATS__ = message.maxPreviewSplats;
+        }
+        return super.postMessage(message, transferOrOptions as Transferable[]);
+      }
+    };
+  });
+  await routeMinimalSplat(page, repoRoot);
+
+  const { server, url } = await serveDirectory(path.join(repoRoot, 'apps/desktop/dist'));
+  try {
+    await page.goto(`${url}/index.html`);
+    await page.getByLabel('Source PLY/SPLAT Path').fill('tests/fixtures/minimal.splat');
+    await page.getByRole('button', { name: 'Load' }).click();
+    await expect(page.getByText('source loaded')).toBeVisible();
+
+    await expect(page.getByText('600,001')).toBeVisible();
+    expect(await page.evaluate(() => (window as any).__AG_MAX_PREVIEW_SPLATS__)).toBeNull();
+    await expect(page.getByText('Right-click/Drag: Pan')).not.toBeVisible();
+    await expect(page.getByText('WASD/QE')).toBeVisible();
+    await expect(page.getByText('Double-click: Place marker')).toBeVisible();
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test('large ply metadata loads preview path and preserves original source count', async ({ page }) => {
+  const repoRoot = path.resolve(process.cwd(), '../..');
+  buildApp();
+
+  await page.addInitScript(() => {
+    (window as any).__AG_CONVERTED_PATHS__ = [];
+    (window as any).__TAURI_INTERNALS__ = {
+      invoke: async (cmd: string, args: any) => {
+        if (cmd === 'plugin:event|listen') return 1;
+        if (cmd === 'plugin:event|unlisten') return true;
+        if (cmd === 'load_source') {
+          return {
+            path: 'tests/fixtures/original-large.ply',
+            previewPath: 'tests/fixtures/minimal.splat',
+            bytes: 1024,
+            format: 'ply',
+            splatCount: 250000,
+            previewSplatCount: 100000,
+          };
+        }
+        throw new Error(`unexpected command ${cmd}`);
+      },
+      transformCallback: () => 0,
+      unregisterCallback: () => {},
+      convertFileSrc: (filePath: string) => {
+        (window as any).__AG_CONVERTED_PATHS__.push(filePath);
+        return filePath;
+      },
+    };
+  });
+  await routeMinimalSplat(page, repoRoot);
+
+  const { server, url } = await serveDirectory(path.join(repoRoot, 'apps/desktop/dist'));
+  try {
+    await page.goto(`${url}/index.html`);
+    await page.getByLabel('Source PLY/SPLAT Path').fill('tests/fixtures/original-large.ply');
+    await page.getByRole('button', { name: 'Load' }).click();
+    await expect(page.getByText('source loaded')).toBeVisible();
+
+    expect(await page.evaluate(() => (window as any).__AG_CONVERTED_PATHS__)).toEqual([
+      'tests/fixtures/minimal.splat',
+    ]);
+    await expect(page.getByText('250,000')).toBeVisible();
+    await expect(page.getByText('Preview Splats')).toBeVisible();
+    await expect(page.getByText('100,000')).toBeVisible();
+  } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });

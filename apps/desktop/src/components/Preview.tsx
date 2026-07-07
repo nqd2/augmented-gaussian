@@ -5,7 +5,6 @@ import { Tooltip } from '@astryxdesign/core/Tooltip';
 import { Text } from '@astryxdesign/core/Text';
 import { AlertTriangle } from 'lucide-react';
 import { PlayCanvasViewer, type ViewerLoadProgress, type ViewerSourceSummary } from '../classes/PlayCanvasViewer';
-import { type CameraMode } from '../classes/CameraController';
 import { type SceneTransform } from '../domains/editor/sceneTransform';
 import { type Bounds } from '../domains/calibration';
 import { type Point3, type PickMode, type UpAxis } from '../domains/calibration';
@@ -23,6 +22,7 @@ export type SourceMetadata = {
   bytes: number;
   format: string;
   splatCount: number;
+  previewSplatCount?: number;
   bounds?: Bounds;
   previewPath?: string;
 };
@@ -37,9 +37,9 @@ export function Preview({
   onSourceProgress,
   onSourceReady,
   onSourceError,
+  previewMaxSplats,
   upAxis,
   sceneTransform,
-  cameraMode,
   sceneVisible = true,
 }: {
   sourceUrl: string | null;
@@ -51,9 +51,9 @@ export function Preview({
   onSourceProgress: (progress: ViewerLoadProgress) => void;
   onSourceReady: (summary: ViewerSourceSummary) => void;
   onSourceError: (error: Error) => void;
+  previewMaxSplats?: number | null;
   upAxis: UpAxis;
   sceneTransform: SceneTransform;
-  cameraMode: CameraMode;
   sceneVisible?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -61,7 +61,6 @@ export function Preview({
   const startPos = useRef({ x: 0, y: 0 });
   const hasViewportSource = Boolean(sourceMetadata || sourceUrl);
 
-  // Sync calibration updates to PlayCanvas overlay
   useEffect(() => {
     if (viewerRef.current) {
       viewerRef.current.updateCalibration(scalePoints, bounds, upAxis);
@@ -73,14 +72,9 @@ export function Preview({
   }, [sceneTransform]);
 
   useEffect(() => {
-    viewerRef.current?.setCameraMode(cameraMode);
-  }, [cameraMode]);
-
-  useEffect(() => {
     viewerRef.current?.setSceneVisible(sceneVisible);
   }, [sceneVisible]);
 
-  // Load model when sourceUrl changes
   useEffect(() => {
     if (!viewerRef.current) return;
     if (sourceUrl) {
@@ -88,11 +82,12 @@ export function Preview({
         onProgress: onSourceProgress,
         onReady: onSourceReady,
         onError: onSourceError,
+        previewMaxSplats,
       });
     } else {
       viewerRef.current.unloadSplat();
     }
-  }, [onSourceError, onSourceProgress, onSourceReady, sourceUrl]);
+  }, [onSourceError, onSourceProgress, onSourceReady, previewMaxSplats, sourceUrl]);
 
   // Initialize viewer after the viewport canvas exists.
   useEffect(() => {
@@ -102,7 +97,6 @@ export function Preview({
 
     const viewer = new PlayCanvasViewer(canvas, bounds);
     viewer.setSceneTransform(sceneTransform);
-    viewer.setCameraMode(cameraMode);
     viewer.updateCalibration(scalePoints, bounds, upAxis);
     viewer.setSceneVisible(sceneVisible);
     viewerRef.current = viewer;
@@ -111,6 +105,7 @@ export function Preview({
         onProgress: onSourceProgress,
         onReady: onSourceReady,
         onError: onSourceError,
+        previewMaxSplats,
       });
     }
 
@@ -126,10 +121,9 @@ export function Preview({
   }
 
   function handlePointerUp(event: React.PointerEvent<HTMLCanvasElement>) {
-    if (event.button !== 0 || event.shiftKey) return;
+    if (event.button !== 0 || event.shiftKey || event.detail < 2) return;
     const dx = event.clientX - startPos.current.x;
     const dy = event.clientY - startPos.current.y;
-    // Trigger pick only if it's a static click (under 5px movement threshold)
     if (Math.sqrt(dx * dx + dy * dy) < 5) {
       const rect = event.currentTarget.getBoundingClientRect();
       const x = event.clientX - rect.left;
@@ -145,8 +139,8 @@ export function Preview({
     return (
       <div className="viewport-empty-state">
         <EmptyState
-          title="No Source Loaded"
-          description="Load a 3D Gaussian Splat (.ply or .splat) file to begin calibration."
+          title="No source"
+          description="Load a .ply, .splat, .sog, or meta.json source."
           icon={<AlertTriangle size={36} color="var(--color-text-secondary)" />}
         />
       </div>
@@ -162,7 +156,7 @@ export function Preview({
           <Tooltip content="Scale endpoints for physical distance reference">
             <span className="legend-color-dot" data-marker="scale" />
           </Tooltip>
-          <Text type="label" size="sm" color="secondary" as="span">Scale Endpoint</Text>
+          <Text type="label" size="sm" color="secondary" as="span">Scale</Text>
         </div>
         <div className="legend-item">
           <Tooltip content="Calculated coordinate origin and up axis">
@@ -173,9 +167,7 @@ export function Preview({
       </div>
 
       <div className="viewport-overlay-hint">
-        {cameraMode === 'fly'
-          ? 'Left-click/Drag: Look • WASD: Move • Q/E: Vertical • Shift/Alt: Speed • Scroll: Forward'
-          : 'Left-click/Drag: Orbit • Shift+Left-click/Drag: Pan • Scroll: Zoom • Left-click: Place marker'}
+        Left-drag: Orbit • Right-hold: Look/Fly • WASD/QE: Move • Middle-drag or Shift+Left-drag: Pan • Wheel: Dolly • Double-click: Place marker
       </div>
     </div>
   );

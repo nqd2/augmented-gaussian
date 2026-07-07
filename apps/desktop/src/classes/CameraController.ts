@@ -1,51 +1,67 @@
 import * as pc from 'playcanvas';
 import { boundsPointToPoint3, type Bounds } from '../domains/calibration';
-import { KeyboardFlyInput } from './KeyboardFlyInput';
 
-export type CameraMode = 'orbit' | 'fly';
+type PointerState = {
+  clientX: number;
+  clientY: number;
+  button: number;
+  shiftKey: boolean;
+  pointerType: string;
+};
 
 export class CameraController {
   private cameraEntity: pc.Entity;
   private canvas: HTMLCanvasElement;
-  private mode: CameraMode = 'orbit';
-  private flyInput = new KeyboardFlyInput();
+  private enabled = true;
 
-  // Spherical Coordinates (current)
-  private currentTheta = Math.PI / 4;
-  private currentPhi = Math.PI / 3;
-  private currentRadius = 5.0;
-  private currentLookAt = new pc.Vec3(0, 0, 0);
+  // First person / character POV camera state
+  private currentPosition = new pc.Vec3(0, 0, 5);
+  private targetPosition = new pc.Vec3(0, 0, 5);
 
-  // Spherical Coordinates (target)
-  private targetTheta = Math.PI / 4;
-  private targetPhi = Math.PI / 3;
-  private targetRadius = 5.0;
-  private targetLookAt = new pc.Vec3(0, 0, 0);
+  private currentYaw = 0; // Horizontal rotation in degrees
+  private targetYaw = 0;
+  private currentPitch = 0; // Vertical rotation in degrees
+  private targetPitch = 0;
 
-  // Dynamic limits based on bounding box
-  private minRadius = 0.1;
-  private maxRadius = 100.0;
+  // Angle limits (pitch) to avoid going upside down
+  private readonly minPitch = -89.0;
+  private readonly maxPitch = 89.0;
 
-  // Interactive tracking
-  private activePointers = new Map<number, { clientX: number; clientY: number }>();
-  private isOrbiting = false;
-  private isPanning = false;
-  private lastPinchDistance = 0;
-  private lastPinchCenter = new pc.Vec2(0, 0);
+  private readonly rotateSpeed = 0.15; // Degrees per pixel drag
+  private readonly dampingSpeed = 15.0;
+  private flySpeed = 5.0; // Dynamically set based on fitBounds
+  private readonly fastFlyMultiplier = 3.0;
+
+  private activePointers = new Map<number, PointerState>();
+  private isDragging = false;
+  private pressedKeys = new Set<string>();
 
   constructor(cameraEntity: pc.Entity, canvas: HTMLCanvasElement) {
     this.cameraEntity = cameraEntity;
     this.canvas = canvas;
+
+    this.currentPosition.copy(this.cameraEntity.getPosition());
+    this.targetPosition.copy(this.currentPosition);
+
+    const euler = this.cameraEntity.getEulerAngles();
+    this.currentPitch = this.targetPitch = euler.x;
+    this.currentYaw = this.targetYaw = euler.y;
+
     this.setupListeners();
   }
 
   private setupListeners() {
+    this.canvas.style.touchAction = 'none';
+
     this.canvas.addEventListener('contextmenu', this.handleContextMenu);
     this.canvas.addEventListener('pointerdown', this.handlePointerDown);
     this.canvas.addEventListener('pointermove', this.handlePointerMove);
     this.canvas.addEventListener('pointerup', this.handlePointerUp);
     this.canvas.addEventListener('pointercancel', this.handlePointerUp);
     this.canvas.addEventListener('wheel', this.handleWheel, { passive: false });
+    window.addEventListener('keydown', this.handleKeyDown);
+    window.addEventListener('keyup', this.handleKeyUp);
+    window.addEventListener('blur', this.handleWindowBlur);
   }
 
   public destroy() {
@@ -55,15 +71,14 @@ export class CameraController {
     this.canvas.removeEventListener('pointerup', this.handlePointerUp);
     this.canvas.removeEventListener('pointercancel', this.handlePointerUp);
     this.canvas.removeEventListener('wheel', this.handleWheel);
-    this.flyInput.destroy();
+    window.removeEventListener('keydown', this.handleKeyDown);
+    window.removeEventListener('keyup', this.handleKeyUp);
+    window.removeEventListener('blur', this.handleWindowBlur);
   }
 
-  public setMode(mode: CameraMode) {
-    this.mode = mode;
-  }
-
-  public getMode(): CameraMode {
-    return this.mode;
+  public setEnabled(enabled: boolean) {
+    this.enabled = enabled;
+    if (!enabled) this.resetPointerGesture();
   }
 
   private handleContextMenu = (e: MouseEvent) => {
@@ -71,205 +86,212 @@ export class CameraController {
   };
 
   private handlePointerDown = (e: PointerEvent) => {
+    if (!this.enabled) return;
+
+    e.preventDefault();
     this.canvas.setPointerCapture(e.pointerId);
-    this.activePointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+    this.activePointers.set(e.pointerId, {
+      clientX: e.clientX,
+      clientY: e.clientY,
+      button: e.button,
+      shiftKey: e.shiftKey,
+      pointerType: e.pointerType,
+    });
 
     if (this.activePointers.size === 1) {
-      if (e.button === 2 || e.shiftKey) {
-        this.isPanning = true;
-        this.isOrbiting = false;
-      } else {
-        this.isOrbiting = true;
-        this.isPanning = false;
-      }
-    } else if (this.activePointers.size === 2) {
-      this.isOrbiting = false;
-      this.isPanning = false;
-      const pts = Array.from(this.activePointers.values());
-      this.lastPinchDistance = this.getPinchDistance(pts[0], pts[1]);
-      this.lastPinchCenter = this.getPinchCenter(pts[0], pts[1]);
+      this.isDragging = true;
     }
   };
 
   private handlePointerMove = (e: PointerEvent) => {
-    if (!this.activePointers.has(e.pointerId)) return;
-    
+    if (!this.enabled || !this.activePointers.has(e.pointerId)) return;
+
+    e.preventDefault();
+
     const prev = this.activePointers.get(e.pointerId)!;
     const dx = e.clientX - prev.clientX;
     const dy = e.clientY - prev.clientY;
-    
-    // Update pointer position
-    this.activePointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
 
-    if (this.activePointers.size === 1) {
-      if (this.isOrbiting) {
-        const orbitScale = 0.005;
-        this.targetTheta -= dx * orbitScale;
-        this.targetPhi = Math.max(
-          1 * Math.PI / 180, // Clamp polar angle min 1 degree
-          Math.min(179 * Math.PI / 180, this.targetPhi + dy * orbitScale) // Clamp polar angle max 179 degree
-        );
-      } else if (this.isPanning) {
-        this.pan(dx, dy);
-      }
-    } else if (this.activePointers.size === 2) {
-      const pts = Array.from(this.activePointers.values());
-      const dist = this.getPinchDistance(pts[0], pts[1]);
-      const center = this.getPinchCenter(pts[0], pts[1]);
+    this.activePointers.set(e.pointerId, {
+      clientX: e.clientX,
+      clientY: e.clientY,
+      button: prev.button,
+      shiftKey: e.shiftKey,
+      pointerType: prev.pointerType,
+    });
 
-      // Pinch zoom
-      if (this.lastPinchDistance > 0 && dist > 0) {
-        const ratio = this.lastPinchDistance / dist;
-        this.targetRadius = Math.max(
-          this.minRadius,
-          Math.min(this.maxRadius, this.targetRadius * ratio)
-        );
-      }
-
-      // Midpoint pan
-      const panDx = center.x - this.lastPinchCenter.x;
-      const panDy = center.y - this.lastPinchCenter.y;
-      this.pan(panDx, panDy);
-
-      this.lastPinchDistance = dist;
-      this.lastPinchCenter = center;
+    if (this.isDragging && this.activePointers.size === 1) {
+      this.targetYaw -= dx * this.rotateSpeed;
+      this.targetPitch = this.clamp(this.targetPitch - dy * this.rotateSpeed, this.minPitch, this.maxPitch);
     }
   };
 
   private handlePointerUp = (e: PointerEvent) => {
-    try {
-      this.canvas.releasePointerCapture(e.pointerId);
-    } catch {}
+    if (this.activePointers.has(e.pointerId)) {
+      try {
+        this.canvas.releasePointerCapture(e.pointerId);
+      } catch {}
+    }
+
     this.activePointers.delete(e.pointerId);
 
     if (this.activePointers.size === 0) {
-      this.isOrbiting = false;
-      this.isPanning = false;
-    } else if (this.activePointers.size === 1) {
-      // Transition back to single touch tracking
-      this.isOrbiting = true;
-      this.isPanning = false;
+      this.resetPointerGesture();
+      return;
     }
   };
 
   private handleWheel = (e: WheelEvent) => {
+    if (!this.enabled) return;
+
     e.preventDefault();
-    if (this.mode === 'fly') {
-      const forward = this.forwardVector();
-      const direction = e.deltaY > 0 ? -1 : 1;
-      const distance = this.currentRadius * 0.08 * direction;
-      this.targetLookAt.add(forward.mulScalar(distance));
-      this.currentLookAt.copy(this.targetLookAt);
-      return;
-    }
-    const zoomIntensity = 0.05;
-    const factor = e.deltaY > 0 ? 1.1 : 0.9;
-    this.targetRadius = Math.max(
-      this.minRadius,
-      Math.min(this.maxRadius, this.targetRadius * (1.0 + (factor - 1.0) * zoomIntensity * 10))
-    );
+
+    // Wheel moves forward/backward
+    const scrollSpeed = 0.05;
+    const forward = this.cameraEntity.forward;
+    const move = forward.clone().mulScalar(-e.deltaY * scrollSpeed * this.flySpeed * 0.1);
+    this.targetPosition.add(move);
   };
 
-  private pan(dx: number, dy: number) {
-    const fov = this.cameraEntity.camera?.fov || 45;
-    const fovRad = (fov * Math.PI) / 180;
-    const factor = (2.0 * this.currentRadius * Math.tan(fovRad / 2.0)) / this.canvas.clientHeight;
+  private handleKeyDown = (e: KeyboardEvent) => {
+    const target = e.target as HTMLElement;
+    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+      return;
+    }
+    const key = movementKey(e.code);
+    if (!key) return;
+    e.preventDefault();
+    this.pressedKeys.add(key);
+  };
 
-    const transform = this.cameraEntity.getWorldTransform();
-    const right = transform.getX(new pc.Vec3());
-    const up = transform.getY(new pc.Vec3());
+  private handleKeyUp = (e: KeyboardEvent) => {
+    const target = e.target as HTMLElement;
+    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+      return;
+    }
+    const key = movementKey(e.code);
+    if (!key) return;
+    this.pressedKeys.delete(key);
+  };
 
-    const panOffset = new pc.Vec3()
-      .addScaled(right, -dx * factor)
-      .addScaled(up, dy * factor);
+  private handleWindowBlur = () => {
+    this.pressedKeys.clear();
+  };
 
-    this.targetLookAt.add(panOffset);
-    this.currentLookAt.add(panOffset);
-  }
-
-  private getPinchDistance(p1: { clientX: number; clientY: number }, p2: { clientX: number; clientY: number }): number {
-    const dx = p1.clientX - p2.clientX;
-    const dy = p1.clientY - p2.clientY;
-    return Math.sqrt(dx * dx + dy * dy);
-  }
-
-  private getPinchCenter(p1: { clientX: number; clientY: number }, p2: { clientX: number; clientY: number }): pc.Vec2 {
-    return new pc.Vec2((p1.clientX + p2.clientX) * 0.5, (p1.clientY + p2.clientY) * 0.5);
-  }
-
-  public fitBounds(bounds?: Bounds) {
+  public fitBounds(bounds?: Bounds, immediate = true) {
     const min = bounds ? boundsPointToPoint3(bounds.min) : [-2, -1, -2];
     const max = bounds ? boundsPointToPoint3(bounds.max) : [2, 2, 2];
-    
+
     const center = new pc.Vec3(
       (min[0] + max[0]) * 0.5,
       (min[1] + max[1]) * 0.5,
       (min[2] + max[2]) * 0.5
     );
+
     const size = new pc.Vec3(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
-    const radius = Math.max(size.length() * 0.75, 3.0);
+    const boundingRadius = Math.max(size.length() * 0.5, 1.0);
+    const fov = this.cameraEntity.camera?.fov ?? 45;
+    const fitRadius = boundingRadius / Math.sin(((fov * Math.PI) / 180) * 0.5);
 
-    // Set dynamic radius limits (10% to 1000% of bounding radius)
-    this.minRadius = radius * 0.1;
-    this.maxRadius = radius * 10.0;
+    this.flySpeed = Math.max(boundingRadius * 0.4, 1.0);
 
-    // Trigger smooth lerp to new target
-    this.targetLookAt.copy(center);
-    this.targetRadius = radius;
-    this.targetTheta = Math.PI / 4;
-    this.targetPhi = Math.PI / 3;
+    const defaultOffset = new pc.Vec3(1.2, 0.8, 1.5).normalize().mulScalar(fitRadius);
+    const startPos = center.clone().add(defaultOffset);
+
+    this.targetPosition.copy(startPos);
+
+    this.cameraEntity.setPosition(startPos);
+    this.cameraEntity.lookAt(center);
+
+    const euler = this.cameraEntity.getEulerAngles();
+    this.targetPitch = euler.x;
+    this.targetYaw = euler.y;
+
+    if (immediate) {
+      this.currentPosition.copy(this.targetPosition);
+      this.currentPitch = this.targetPitch;
+      this.currentYaw = this.targetYaw;
+      this.cameraEntity.setPosition(this.currentPosition);
+      this.cameraEntity.setEulerAngles(this.currentPitch, this.currentYaw, 0);
+    }
+  }
+
+  public resetView() {
+    this.fitBounds(undefined, true);
   }
 
   public update(dt: number) {
-    if (this.mode === 'fly') {
-      this.updateFlyTarget(dt);
-    }
+    if (!this.enabled) return;
 
-    // Damping factor (independent of framerate)
-    const damping = Math.min(15.0 * dt, 1.0);
+    this.updateFly(dt);
 
-    this.currentTheta += (this.targetTheta - this.currentTheta) * damping;
-    this.currentPhi += (this.targetPhi - this.currentPhi) * damping;
-    this.currentRadius += (this.targetRadius - this.currentRadius) * damping;
-    this.currentLookAt.lerp(this.currentLookAt, this.targetLookAt, damping);
+    const damping = this.damping(dt);
 
-    // Convert spherical coordinates back to Cartesian positions (Y-up convention)
-    const x = this.currentLookAt.x + this.currentRadius * Math.sin(this.currentPhi) * Math.sin(this.currentTheta);
-    const y = this.currentLookAt.y + this.currentRadius * Math.cos(this.currentPhi);
-    const z = this.currentLookAt.z + this.currentRadius * Math.sin(this.currentPhi) * Math.cos(this.currentTheta);
+    this.currentYaw = this.lerpAngle(this.currentYaw, this.targetYaw, damping);
+    this.currentPitch += (this.targetPitch - this.currentPitch) * damping;
 
-    this.cameraEntity.setPosition(x, y, z);
-    this.cameraEntity.lookAt(this.currentLookAt);
+    this.cameraEntity.setEulerAngles(this.currentPitch, this.currentYaw, 0);
+
+    this.currentPosition.lerp(this.currentPosition, this.targetPosition, damping);
+    this.cameraEntity.setPosition(this.currentPosition);
   }
 
-  private updateFlyTarget(dt: number) {
-    const axes = this.flyInput.axes();
-    if (!axes.forward && !axes.right && !axes.up) return;
+  private updateFly(dt: number) {
+    if (this.pressedKeys.size === 0) return;
 
-    const speedMultiplier = axes.fast ? 4 : axes.slow ? 0.25 : 1;
-    const speed = Math.max(this.currentRadius, 1) * 0.9 * speedMultiplier;
-    const forward = this.forwardVector();
-    const right = this.rightVector();
+    const forwardAmount = axis(this.pressedKeys, 'KeyW', 'KeyS') + axis(this.pressedKeys, 'ArrowUp', 'ArrowDown');
+    const rightAmount = axis(this.pressedKeys, 'KeyD', 'KeyA') + axis(this.pressedKeys, 'ArrowRight', 'ArrowLeft');
+    const upAmount = axis(this.pressedKeys, 'KeyE', 'KeyQ');
+    if (!forwardAmount && !rightAmount && !upAmount) return;
+
+    const forward = this.cameraEntity.forward.clone();
+    const right = this.cameraEntity.right.clone();
     const up = new pc.Vec3(0, 1, 0);
+
     const move = new pc.Vec3()
-      .addScaled(forward, axes.forward)
-      .addScaled(right, axes.right)
-      .addScaled(up, axes.up);
+      .addScaled(forward, forwardAmount)
+      .addScaled(right, rightAmount)
+      .addScaled(up, upAmount);
+
     if (move.lengthSq() <= 1e-8) return;
-    move.normalize().mulScalar(speed * dt);
-    this.targetLookAt.add(move);
-    this.currentLookAt.add(move);
+
+    const fast = this.pressedKeys.has('ShiftLeft') || this.pressedKeys.has('ShiftRight');
+    const speed = this.flySpeed * (fast ? this.fastFlyMultiplier : 1);
+    move.normalize().mulScalar(speed * Math.max(dt, 0));
+    this.targetPosition.add(move);
   }
 
-  private forwardVector() {
-    return new pc.Vec3(
-      -Math.sin(this.currentPhi) * Math.sin(this.currentTheta),
-      -Math.cos(this.currentPhi),
-      -Math.sin(this.currentPhi) * Math.cos(this.currentTheta),
-    ).normalize();
+  private resetPointerGesture() {
+    this.isDragging = false;
+    this.activePointers.clear();
   }
 
-  private rightVector() {
-    return new pc.Vec3(Math.cos(this.currentTheta), 0, -Math.sin(this.currentTheta)).normalize();
+  private damping(dt: number) {
+    return 1.0 - Math.exp(-this.dampingSpeed * Math.max(dt, 0));
   }
+
+  private lerpAngle(from: number, to: number, t: number) {
+    let delta = (to - from) % 360;
+    if (delta > 180) delta -= 360;
+    if (delta < -180) delta += 360;
+    return from + delta * t;
+  }
+
+  private clamp(value: number, min: number, max: number) {
+    return Math.max(min, Math.min(max, value));
+  }
+}
+
+function movementKey(code: string) {
+  return [
+    'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE',
+    'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+    'ShiftLeft', 'ShiftRight'
+  ].includes(code)
+    ? code
+    : null;
+}
+
+function axis(keys: Set<string>, positive: string, negative: string) {
+  return (keys.has(positive) ? 1 : 0) - (keys.has(negative) ? 1 : 0);
 }

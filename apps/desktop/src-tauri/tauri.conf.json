@@ -25,7 +25,8 @@
       "assetProtocol": {
         "enable": true,
         "scope": [
-          "$HOME/**"
+          "$HOME/**",
+          "$TEMP/**"
         ]
       },
       "capabilities": [

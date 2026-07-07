@@ -19,6 +19,7 @@ export type SplatColumnName =
 
 export type ParsedSplatColumns = {
   count: number;
+  sourceCount?: number;
   columns: Record<SplatColumnName, Float32Array>;
 };
 
@@ -39,20 +40,37 @@ const columnNames: SplatColumnName[] = [
   'rot_3',
 ];
 
-export function parseSplatColumns(input: Uint8Array | ArrayBuffer): ParsedSplatColumns {
+export function parseSplatColumns(input: Uint8Array | ArrayBuffer, maxPreviewSplats?: number | null): ParsedSplatColumns {
   const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
   if (bytes.length === 0 || bytes.length % BYTES_PER_SPLAT !== 0) {
     throw new Error(`Invalid .splat byte length ${bytes.length}`);
   }
 
-  const count = bytes.length / BYTES_PER_SPLAT;
+  const sourceCount = bytes.length / BYTES_PER_SPLAT;
+
+  // Noise pruning: filter out low opacity splats (opacity < 0.05, i.e., raw value < 13)
+  const opacityThresholdRaw = 13;
+  const keptIndices: number[] = [];
+  for (let i = 0; i < sourceCount; i += 1) {
+    const offset = i * BYTES_PER_SPLAT;
+    if (bytes[offset + 27] >= opacityThresholdRaw) {
+      keptIndices.push(i);
+    }
+  }
+
+  const keptCount = keptIndices.length;
+  const count = maxPreviewSplats && maxPreviewSplats > 0
+    ? Math.min(keptCount, Math.floor(maxPreviewSplats))
+    : keptCount;
+
   const columns = Object.fromEntries(
     columnNames.map((name) => [name, new Float32Array(count)]),
   ) as Record<SplatColumnName, Float32Array>;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 
   for (let i = 0; i < count; i += 1) {
-    const offset = i * BYTES_PER_SPLAT;
+    const sourceIndex = count === keptCount ? keptIndices[i] : keptIndices[Math.floor((i * keptCount) / count)];
+    const offset = sourceIndex * BYTES_PER_SPLAT;
     columns.x[i] = view.getFloat32(offset + 0, true);
     columns.y[i] = view.getFloat32(offset + 4, true);
     columns.z[i] = view.getFloat32(offset + 8, true);
@@ -86,7 +104,11 @@ export function parseSplatColumns(input: Uint8Array | ArrayBuffer): ParsedSplatC
     columns.rot_3[i] = q[3];
   }
 
-  return { count, columns };
+  return {
+    count,
+    sourceCount: sourceCount === count ? undefined : sourceCount,
+    columns,
+  };
 }
 
 export function splatColumnsToPlyElements(parsed: ParsedSplatColumns) {

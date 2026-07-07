@@ -3,9 +3,8 @@ import { Badge } from '@astryxdesign/core/Badge';
 import { Button } from '@astryxdesign/core/Button';
 import { Card } from '@astryxdesign/core/Card';
 import { TextInput } from '@astryxdesign/core/TextInput';
-import { Eye, EyeOff, FolderOpen, MousePointer2, Move3D, Plane, Rotate3D, Trash2 } from 'lucide-react';
+import { Eye, EyeOff, FolderOpen, Trash2 } from 'lucide-react';
 import { SceneTransformControls } from './SceneTransformControls';
-import { type CameraMode } from './useEditorScene';
 import { type EditorSceneState, type SceneTransform } from './sceneTransform';
 
 export function EditorPanel({
@@ -13,8 +12,6 @@ export function EditorPanel({
   setInputPath,
   handleBrowseInputPath,
   scene,
-  cameraMode,
-  setCameraMode,
   setSceneVisible,
   deleteScene,
   resetScene,
@@ -26,8 +23,6 @@ export function EditorPanel({
   setInputPath: (value: string) => void;
   handleBrowseInputPath: () => void;
   scene: EditorSceneState;
-  cameraMode: CameraMode;
-  setCameraMode: (mode: CameraMode) => void;
   setSceneVisible: (value: boolean) => void;
   deleteScene: () => void;
   resetScene: () => void;
@@ -87,32 +82,6 @@ export function EditorPanel({
                 variant="secondary"
                 isDisabled={isBusy}
                 onClick={resetScene}
-              />
-            </div>
-          </div>
-
-          <div className="config-group">
-            <h3 className="config-group-title">Tools</h3>
-            <div className="editor-button-grid">
-              <Button label="Select" variant="secondary" icon={<MousePointer2 size={14} />} />
-              <Button label="Move" variant="secondary" icon={<Move3D size={14} />} />
-              <Button label="Rotate" variant="secondary" icon={<Rotate3D size={14} />} />
-              <Button label="Floor Pick" variant="secondary" icon={<Plane size={14} />} />
-            </div>
-          </div>
-
-          <div className="config-group">
-            <h3 className="config-group-title">Camera</h3>
-            <div className="editor-button-grid">
-              <Button
-                label="Orbit"
-                variant={cameraMode === 'orbit' ? 'primary' : 'secondary'}
-                onClick={() => setCameraMode('orbit')}
-              />
-              <Button
-                label="WASD Fly"
-                variant={cameraMode === 'fly' ? 'primary' : 'secondary'}
-                onClick={() => setCameraMode('fly')}
               />
             </div>
           </div>

@@ -85,7 +85,7 @@ export function useCalibration() {
     [adapterCommand, reconstructionMethod],
   );
 
-  const isFloorCalibrated = true; // Automatically considered valid since it's derived from upAxis
+  const isFloorCalibrated = true;
 
   const isScaleCalibrated = useMemo(() => (
     userPickedScalePoints.every(Boolean)
@@ -111,7 +111,7 @@ export function useCalibration() {
       setPickMode('scale1');
     } else if (pickMode === 'scale1') {
       updateScalePoint(1, point);
-      setPickMode('scale0'); // loop back or just stay on scale0
+      setPickMode('scale0');
     }
   }, [pickMode, updateScalePoint, setPickMode]);
 
