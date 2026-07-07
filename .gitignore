@@ -30,3 +30,6 @@ RESULT.md
 .gitnexus/
 /docs/examples/
 
+# local fonts folder for report compilation
+/report/Fonts/
+

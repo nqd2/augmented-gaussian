@@ -1,0 +1,67 @@
+\section{Mở đầu}
+
+\subsection{Bối cảnh}
+
+3D Gaussian Splatting (3DGS) là một hướng biểu diễn cảnh 3D hiện đại, trong đó cảnh được mô tả bằng tập các Gaussian không gian ba chiều thay vì mesh tam giác truyền thống. Mỗi Gaussian thường mang vị trí, tỷ lệ theo các trục chính, hướng, độ mờ và hệ số màu. Khi được rasterize bằng pipeline phù hợp, tập Gaussian này có thể tạo ảnh chất lượng cao với tốc độ thời gian thực, đặc biệt hữu ích cho visual reconstruction, digital twin, tham quan ảo và các ứng dụng cần xem lại không gian đã quét.
+
+Trong AR, yêu cầu không chỉ dừng ở hiển thị. Vật thể ảo phải biết phần nào của cảnh thật là vật cản, đâu là mặt đi lại, đâu là vùng cần che khuất và đâu là tỷ lệ thế giới thực. Một mô hình 3DGS thuần túy có thể nhìn rất thật nhưng lại không có bề mặt hình học rõ ràng để engine AR kiểm tra va chạm hoặc dựng occlusion. Nếu đặt một vật thể ảo vào cảnh, vật thể đó có thể xuyên qua tường, không đứng đúng trên sàn, hoặc không bị đồ vật thật che đúng cách. Vấn đề cốt lõi của đề tài vì vậy là biến dữ liệu 3DGS từ biểu diễn phục vụ nhìn thấy thành dữ liệu hình học phục vụ tương tác.
+
+Đề tài được thực hiện trong bối cảnh đơn vị VHT, thuộc Tập đoàn Công nghiệp - Viễn thông Quân đội, trong chương trình Viettel Digital Talent. Mục tiêu không phải xây dựng một renderer 3DGS hoàn chỉnh từ đầu, mà là phát triển công cụ xử lý sau tái tạo: đọc dữ liệu đầu vào, chuẩn hóa theo hệ tọa độ và tỷ lệ thật, lọc dữ liệu, tái tạo bề mặt hình học, trích xuất artifact phục vụ AR, và đóng gói đầu ra theo hướng dễ tích hợp với WebAR hoặc ứng dụng desktop.
+
+\subsection{Vấn đề nghiên cứu}
+
+Dữ liệu 3DGS có hai đặc điểm làm cho việc dùng trực tiếp trong AR trở nên khó khăn. Thứ nhất, dữ liệu là tập primitive xác suất, không phải manifold surface. Một Gaussian có thể đóng góp màu và độ mờ lên ảnh render nhưng không đồng nghĩa với một điểm trên bề mặt cứng. Thứ hai, dữ liệu tái tạo thường phụ thuộc vào hệ tọa độ của quá trình scan hoặc training; đơn vị đo, hướng trục lên và gốc tọa độ không mặc nhiên khớp với thế giới thật. Nếu bỏ qua hai đặc điểm này, hệ thống AR sẽ có hình ảnh đẹp nhưng tương tác kém tin cậy.
+
+Từ đó, đề tài tập trung vào ba câu hỏi chính:
+
+\begin{enumerate}
+  \item Làm thế nào để chuyển dữ liệu 3DGS đầu vào thành lưới hình học đủ ổn định cho occlusion và navigation mà vẫn giữ kích thước artifact phù hợp?
+  \item Làm thế nào để thao tác căn chỉnh tỷ lệ, hướng trục và transform cảnh đủ đơn giản trong GUI nhưng vẫn sinh recipe rõ ràng cho backend?
+  \item Làm thế nào để thiết kế pipeline có thể mở rộng giữa reconstruction nội bộ bằng voxel và reconstruction ngoài bằng SuGaR hoặc Poisson adapter?
+\end{enumerate}
+
+Các câu hỏi trên được giải quyết bằng cách tách hệ thống thành nhân xử lý Rust, CLI proof of concept và ứng dụng desktop Tauri/React. Nhân Rust giữ trách nhiệm đọc, chuẩn hóa, lọc, voxel hóa, mesh extraction, navmesh và export. CLI dùng để chạy tự động, kiểm thử và benchmark. Ứng dụng desktop là giao diện cuối cùng để người dùng thao tác nguồn dữ liệu, preview 3DGS, đặt scale endpoints, chọn up axis, chỉnh rotation XYZ và position XYZ, chạy bake và lưu gói WebAR.
+
+\subsection{Mục tiêu}
+
+Mục tiêu tổng quát của đề tài là xây dựng công cụ xử lý dữ liệu 3DGS phục vụ hệ thống AR. Công cụ cần nhận đầu vào \code{.ply} hoặc \code{.splat}, sinh ra dữ liệu hình học có cấu trúc và đóng gói được thành đầu ra chuẩn. Mục tiêu này được cụ thể hóa thành các mục tiêu thành phần:
+
+\begin{itemize}
+  \item Đọc và chuẩn hóa dữ liệu 3DGS từ các nguồn phổ biến, bảo toàn các thuộc tính cần thiết cho render và export.
+  \item Cung cấp cơ chế căn chỉnh thực tế gồm khoảng cách scale, up axis và scene transform bằng rotation XYZ, position XYZ.
+  \item Lọc dữ liệu lỗi hoặc nhiễu thông qua filter NaN, opacity, box, sphere, cluster và floater contribution.
+  \item Tái tạo hình học bằng voxelization CPU/GPU, mesh extraction và tùy chọn adapter SuGaR/Poisson.
+  \item Sinh \term{occlusion mesh} dưới dạng \artifact{occlusion.glb}; sinh \term{navigation mesh} tùy chọn cho profile phù hợp.
+  \item Đóng gói đầu ra gồm \artifact{manifest.json}, \artifact{scene.sog}, \artifact{occlusion.glb}, \artifact{webar.zip} và các file navmesh nếu được bật.
+  \item Duy trì cấu trúc kiểm thử đủ để bảo vệ các hợp đồng dữ liệu giữa GUI, Tauri command và Rust core.
+\end{itemize}
+
+\subsection{Phạm vi}
+
+Phạm vi đề tài là công cụ xử lý và chuyển đổi dữ liệu, không phải toàn bộ hệ thống AR production. Ứng dụng desktop là sản phẩm cuối cùng của giao diện người dùng trong repository hiện tại; CLI đóng vai trò proof of concept, regression harness và công cụ benchmark. Hệ thống chưa đặt mục tiêu tự động nhận diện ngữ nghĩa như tường, sàn, bàn, ghế hay vật thể động. Các quyết định hình học vẫn dựa vào dữ liệu 3DGS, profile bake và một số tương tác người dùng tối thiểu.
+
+Với floor calibration, codebase hiện tại không còn workflow chọn nhiều điểm sàn. Recipe căn chỉnh dùng \code{upAxis}, \code{floorNormal}, hai \code{scalePoints}, \code{scaleDistanceMeters} và \code{origin}. Trong GUI, \code{floorNormal} được suy ra trực tiếp từ up axis đã chọn, nghĩa là đây là cơ chế chọn hướng trục lên chứ chưa phải thuật toán tự động fit mặt phẳng sàn từ điểm. Vì vậy báo cáo mô tả đúng hiện trạng này, tránh diễn đạt rằng hệ thống đã có floor detection tự động.
+
+\subsection{Đóng góp chính}
+
+Đề tài có bốn đóng góp chính. Đóng góp thứ nhất là thiết kế pipeline chuyển 3DGS sang artifact hình học theo hướng tách biệt giữa render data và AR geometry. Đóng góp thứ hai là triển khai nhân xử lý Rust có thể chạy qua CLI hoặc Tauri command, bao gồm đọc nguồn, alignment bake, filter, voxelization, mesh extraction, navmesh và export. Đóng góp thứ ba là giao diện desktop cho phép thao tác trực quan với scene, đặt scale endpoints, chọn up axis, chỉnh rotation/position và chạy bake. Đóng góp thứ tư là hợp đồng artifact rõ ràng để WebAR runtime đọc được dữ liệu scene, occlusion mesh và metadata.
+
+\begin{figure}[H]
+\centering
+\fbox{\begin{minipage}{0.9\textwidth}
+\centering
+\begin{tabularx}{0.84\textwidth}{>{\bfseries}p{3.3cm}X}
+\toprule
+Dữ liệu 3DGS & \code{.ply/.splat}, Gaussian attributes, preview scene\\
+Căn chỉnh thực tế & scale endpoints, up axis, rotation XYZ, position XYZ\\
+Tái tạo hình học & CPU/GPU voxel, SuGaR/Poisson adapter, rerecast navmesh\\
+WebAR bundle & \artifact{scene.sog}, \artifact{occlusion.glb}, \artifact{manifest.json}, \artifact{webar.zip}\\
+\bottomrule
+\end{tabularx}
+\end{minipage}}
+\caption{Luồng mục tiêu của công cụ xử lý 3DGS phục vụ AR.}
+\end{figure}
+
+\subsection{Cấu trúc báo cáo}
+
+Báo cáo gồm chín phần. Phần 1 trình bày bối cảnh, vấn đề, mục tiêu và phạm vi. Phần 2 tổng hợp cơ sở lý thuyết liên quan đến 3DGS, voxelization, Marching Cubes, SuGaR, Poisson, occlusion và navigation mesh. Phần 3 phân tích yêu cầu chức năng và phi chức năng. Phần 4 mô tả thiết kế hệ thống. Phần 5 trình bày phương pháp xử lý dữ liệu. Phần 6 mô tả triển khai ứng dụng desktop. Phần 7 trình bày kiểm thử và phương pháp đánh giá. Phần 8 nêu hạn chế và hướng phát triển. Phần 9 kết luận.

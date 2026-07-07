@@ -1,0 +1,131 @@
+\section{Thiết kế hệ thống}
+
+\subsection{Quan điểm thiết kế theo dataflow}
+
+Thiết kế hệ thống được nhìn theo luồng dữ liệu logic thay vì theo từng màn hình giao diện. Một lượt xử lý bắt đầu từ dữ liệu 3DGS đầu vào, đi qua recipe căn chỉnh, process config, reconstruction stage và cuối cùng là export bundle. Cách nhìn này phù hợp với mục tiêu nghiên cứu vì mỗi boundary trong pipeline đều trả lời một câu hỏi riêng:
+
+\begin{itemize}
+  \item Input chứa dữ liệu gì và đã được chuẩn hóa chưa?
+  \item Calibration recipe mô tả cách đưa scene về hệ tọa độ sử dụng được trong AR như thế nào?
+  \item Processing config quyết định thuật toán và tham số xử lý ra sao?
+  \item Reconstruction stage tạo geometry proxy bằng đường nào?
+  \item Export stage đóng gói kết quả để runtime và đánh giá dùng được như thế nào?
+\end{itemize}
+
+\begin{figure}[H]
+\centering
+\fbox{\begin{minipage}{0.9\textwidth}
+\centering
+\begin{tabularx}{0.84\textwidth}{>{\bfseries}p{3.2cm}X}
+\toprule
+Input & \code{.ply/.splat} được đọc và chuẩn hóa thành bảng splat nội bộ.\\
+Calibration Recipe & Scale endpoints, scale distance, up axis, origin và edit recipe.\\
+Processing Config & Reconstruction method, voxel backend, fill, carve, mesh, navmesh, export.\\
+Reconstruction & Voxel path trong Rust core hoặc adapter path cho SuGaR/Poisson.\\
+Export & Scene render, geometry proxy, manifest và WebAR bundle.\\
+\bottomrule
+\end{tabularx}
+\end{minipage}}
+\caption{Dataflow logic của một lượt xử lý 3DGS-to-AR.}
+\end{figure}
+
+Luồng này cũng giúp tách trách nhiệm. Calibration không quyết định thuật toán reconstruction. Reconstruction không quyết định người dùng đã chọn scale như thế nào. Export không cần biết chi tiết GUI. Nhờ vậy, cùng một core có thể phục vụ GUI, CLI, test và benchmark.
+
+\subsection{Input boundary}
+
+Input boundary chịu trách nhiệm đưa dữ liệu nguồn về một biểu diễn thống nhất. Người dùng có thể cung cấp \code{.ply} hoặc \code{.splat}; mỗi định dạng có cách lưu thuộc tính khác nhau. Nếu các stage sau phải xử lý trực tiếp từng định dạng, pipeline sẽ khó bảo trì và dễ phát sinh lỗi không đồng nhất. Vì vậy, core đọc nguồn và chuẩn hóa thành bảng splat nội bộ trước khi alignment, filter hoặc reconstruction chạy.
+
+Boundary này có hai yêu cầu quan trọng. Thứ nhất, nó phải giữ đủ thông tin cho cả render và geometry: vị trí, scale, rotation, opacity và màu. Thứ hai, nó phải ghi nhận source stats như format, số splat và kích thước nguồn để manifest có thể phục vụ đánh giá. Input boundary vì vậy không chỉ là file parser, mà là điểm bắt đầu của tính tái lập.
+
+\subsection{Calibration Recipe boundary}
+
+Calibration Recipe mô tả các quyết định gắn với nguồn dữ liệu và thao tác căn chỉnh. Nó gồm up axis, floor normal, scale points, scale distance meters, origin và edit operations. Đây là boundary giữa dữ liệu thô và dữ liệu có ý nghĩa trong hệ tọa độ AR. Nếu boundary này không rõ, các stage sau sẽ khó biết dữ liệu đã được scale chưa, đã xoay chưa hoặc origin có được đặt lại không.
+
+\begin{lstlisting}[language={}]
+{
+  "alignmentRecipe": {
+    "upAxis": "y",
+    "floorNormal": [0, 1, 0],
+    "scalePoints": [[0, 0, 0], [2, 0, 0]],
+    "scaleDistanceMeters": 2.0,
+    "origin": [0, 0, 0]
+  },
+  "editRecipe": { "operations": [] }
+}
+\end{lstlisting}
+
+Trong GUI hiện tại, \code{floorNormal} được suy ra từ up axis. Điều này cần được hiểu đúng: hệ thống đang cung cấp cơ chế chọn hướng trục lên và bake alignment, chưa phải thuật toán tự động fit sàn từ point cloud. Boundary recipe vẫn hữu ích vì nó làm quyết định căn chỉnh trở nên rõ ràng, có thể serialize, có thể kiểm thử và có thể tái chạy.
+
+\subsection{Processing Config boundary}
+
+Processing Config mô tả cách xử lý dữ liệu sau khi đã có recipe. Nó gồm reconstruction method, voxel config, fill mode, carve config, mesh mode, navmesh config và export config. Tách config khỏi recipe là quyết định quan trọng. Recipe trả lời câu hỏi "scene này được căn chỉnh như thế nào"; config trả lời câu hỏi "pipeline này xử lý scene bằng thuật toán và tham số nào".
+
+Sự tách biệt này cho phép cùng một scene và cùng một recipe được chạy với nhiều cấu hình khác nhau. Ví dụ, có thể giữ scale/up axis không đổi nhưng so sánh backend CPU/GPU, so sánh voxel size, bật/tắt navmesh hoặc chuyển từ voxel sang adapter SuGaR/Poisson. Đây là cơ sở để benchmark và debug có ý nghĩa.
+
+\begin{table}[H]
+\centering
+\caption{Ranh giới giữa recipe và process config.}
+\begin{tabularx}{\textwidth}{p{3.4cm}p{5.2cm}X}
+\toprule
+\textbf{Boundary} & \textbf{Nội dung chính} & \textbf{Lý do tách riêng}\\
+\midrule
+Calibration Recipe & Scale points, distance, up axis, origin, edit operations & Gắn với scene và thao tác căn chỉnh; cần tái lập theo dữ liệu đầu vào.\\
+Processing Config & Voxel backend, reconstruction method, fill/carve, mesh, navmesh, export & Gắn với thuật toán xử lý; cần thay đổi để thử nghiệm và tối ưu.\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Reconstruction boundary}
+
+Reconstruction boundary là nơi pipeline chuyển từ splat table sang geometry proxy. Hệ thống có hai nhánh chính. Nhánh thứ nhất là voxel path trong Rust core: dữ liệu được voxel hóa, fill/carve, trích xuất mesh và bake navmesh nếu bật. Nhánh thứ hai là adapter path: core ghi PLY đã lọc, gọi external adapter cho SuGaR hoặc Poisson, nhận mesh JSON và validate trước khi export.
+
+\begin{figure}[H]
+\centering
+\fbox{\begin{minipage}{0.9\textwidth}
+\centering
+\begin{tabularx}{0.84\textwidth}{>{\bfseries}p{3.2cm}X}
+\toprule
+Voxel path & Core tự xử lý: voxelization, fill, carve, mesh extraction, navmesh.\\
+Adapter path & Core chuẩn bị input và gọi adapter SuGaR/Poisson qua JSON contract.\\
+Common output & Mesh hợp lệ được đưa vào cùng export path và cùng manifest schema.\\
+\bottomrule
+\end{tabularx}
+\end{minipage}}
+\caption{Hai nhánh reconstruction cùng hội tụ về geometry output.}
+\end{figure}
+
+Thiết kế này tránh khóa hệ thống vào một thuật toán duy nhất. Voxel path ổn định, dễ kiểm thử và phù hợp với geometry proxy. Adapter path cho phép thử các phương pháp reconstruction ngoài mà không làm core phụ thuộc vào môi trường Python/CUDA hoặc tool chuyên dụng. Điểm hội tụ là mesh hợp lệ: sau reconstruction, các bước export và đánh giá không cần biết mesh đến từ voxel hay adapter.
+
+\subsection{Export boundary}
+
+Export boundary chuyển kết quả xử lý thành artifact dùng được. Đây là điểm pipeline rời khỏi không gian thuật toán và bước vào không gian tích hợp. Output tối thiểu gồm dữ liệu render, geometry proxy, metadata và bundle. Tuy nhiên, phần này không chỉ là ghi file. Export phải bảo đảm manifest mô tả đúng artifact hiện có, xóa artifact stale khi navmesh không được sinh, ghi metric kích thước và warning để người dùng biết chất lượng output.
+
+Trong dataflow tổng thể, manifest là sợi dây nối giữa xử lý, runtime và đánh giá. Viewer cần manifest để biết file nào cần load. Báo cáo cần manifest để trích số liệu. Người phát triển cần manifest để debug warning. Vì vậy, export boundary phải được xem là một phần của thiết kế hệ thống, không phải bước phụ sau thuật toán.
+
+\subsection{Các bất biến của pipeline}
+
+Để pipeline đáng tin cậy, mỗi boundary cần giữ một số bất biến. Input phải được parse thành bảng splat hợp lệ. Recipe phải chỉ chứa giá trị hữu hạn và scale points hợp lệ. Config phải chọn method và tham số có thể deserialize ở Rust core. Reconstruction phải trả mesh hợp lệ hoặc warning/lỗi rõ ràng. Export phải tạo manifest nhất quán với file thật trong output directory.
+
+\begin{longtable}{p{3.2cm}p{5.5cm}p{4.8cm}}
+\caption{Bất biến chính trong dataflow.}\\
+\toprule
+\textbf{Stage} & \textbf{Bất biến cần giữ} & \textbf{Rủi ro nếu vi phạm}\\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Stage} & \textbf{Bất biến cần giữ} & \textbf{Rủi ro nếu vi phạm}\\
+\midrule
+\endhead
+Input & Splat table có số cột khớp, giá trị cơ bản đọc được. & Pipeline lỗi muộn hoặc mesh rỗng khó debug.\\
+Recipe & Scale distance dương, scale points hữu hạn, up axis hợp lệ. & Artifact sai tỷ lệ, sai hướng hoặc không bake được.\\
+Config & Method, backend, fill/carve/navmesh deserialize đúng. & GUI và core hiểu khác nhau về cùng một lượt bake.\\
+Reconstruction & Mesh output có vertex/index hữu hạn và triangle count hợp lý. & GLB lỗi, occlusion sai hoặc navmesh không sinh được.\\
+Export & Manifest khớp file thật, không giữ stale artifact. & Viewer đọc nhầm file hoặc báo cáo dùng metric sai.\\
+\bottomrule
+\end{longtable}
+
+Các bất biến này giải thích vì sao hệ thống cần test ở nhiều lớp. Unit test kiểm tra từng stage. E2E test kiểm tra GUI serialize recipe/config đúng. Benchmark kiểm tra metric và hiệu năng. Nếu chỉ test một lớp, nhiều lỗi dataflow sẽ không lộ ra.
+
+\subsection{Lý do thiết kế phù hợp với đề tài}
+
+Thiết kế theo dataflow phù hợp với mục tiêu nghiên cứu vì nó làm rõ chuyển đổi từ dữ liệu render sang dữ liệu AR. Mỗi boundary tương ứng với một quyết định có thể giải thích trong báo cáo: chuẩn hóa đầu vào, căn chỉnh thế giới thật, chọn thuật toán, dựng geometry, đóng gói artifact. Điều này cũng giúp tránh mô tả hệ thống như một tập module rời rạc. Thay vào đó, báo cáo có thể chứng minh rằng các thành phần đều phục vụ cùng một luồng: biến 3DGS thành dữ liệu WebAR có thể dùng và có thể kiểm chứng.

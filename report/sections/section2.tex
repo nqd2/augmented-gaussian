@@ -1,0 +1,93 @@
+\section{Cơ sở lý thuyết}
+
+\subsection{3D Gaussian Splatting}
+
+3D Gaussian Splatting (3DGS) là một phương pháp biểu diễn và render cảnh 3D dựa trên tập các Gaussian trong không gian ba chiều \cite{Kerbl2023}. Khác với mesh tam giác, 3DGS không mô tả cảnh bằng các đỉnh, cạnh và mặt có topology rõ ràng. Khác với point cloud truyền thống, mỗi phần tử của 3DGS không chỉ là một điểm rời rạc mà là một primitive có kích thước, hướng, opacity và màu. Khác với nhiều cách biểu diễn neural rendering như NeRF, 3DGS đưa cảnh về tập primitive tường minh hơn, nhờ đó có thể render thời gian thực hiệu quả hơn trong nhiều trường hợp.
+
+Một Gaussian 3D thường được mô tả bởi tâm $\mu \in \mathbb{R}^{3}$, ma trận hiệp phương sai $\Sigma$, opacity $\alpha$ và thông tin màu. Về trực giác, $\mu$ xác định vị trí, $\Sigma$ xác định hình dạng ellipsoid, còn $\alpha$ mô tả mức đóng góp của Gaussian vào ảnh render. Một hàm Gaussian có thể viết dưới dạng:
+
+\[
+G(x) = \exp \left(-\frac{1}{2}(x-\mu)^T\Sigma^{-1}(x-\mu)\right)
+\]
+
+Trong triển khai thực tế, $\Sigma$ thường không được lưu trực tiếp dưới dạng ma trận đầy đủ, mà được tham số hóa qua scale và rotation để thuận tiện tối ưu và render. Khi render, Gaussian 3D được chiếu lên không gian ảnh thành splat 2D. Các splat được tổng hợp theo opacity để tạo màu cuối cùng. Một dạng alpha compositing thường gặp có thể biểu diễn khái quát như sau:
+
+\[
+C = \sum_i T_i \alpha_i c_i,\qquad
+T_i = \prod_{j<i}(1-\alpha_j)
+\]
+
+Trong đó $c_i$ là màu của splat thứ $i$, $\alpha_i$ là opacity sau khi chiếu và $T_i$ là độ truyền qua tích lũy từ các splat phía trước. Công thức này cho thấy bản chất của 3DGS là phục vụ hình ảnh: primitive nào đóng góp vào màu ảnh, với độ mờ bao nhiêu, và theo thứ tự nào. Nó không trực tiếp trả lời câu hỏi: đâu là mặt cứng, đâu là vật cản, đâu là vùng có thể đi lại.
+
+\subsection{Khoảng trống hình học của 3DGS trong AR}
+
+Điểm mạnh lớn nhất của 3DGS cũng chính là nguồn gốc của khó khăn khi đưa vào AR. 3DGS có thể tái tạo hình ảnh rất thuyết phục, nhưng biểu diễn này không đảm bảo có bề mặt hình học kín, normal ổn định hoặc topology nhất quán. Một vùng tường trong ảnh có thể được tái tạo bằng nhiều Gaussian mềm chồng lên nhau; một cạnh bàn có thể là tập Gaussian kéo dài; một khoảng trống nhỏ có thể bị lấp bởi opacity tích lũy. Những dữ kiện này đủ tốt cho render, nhưng chưa đủ tốt cho suy luận hình học.
+
+Trong AR, hệ thống cần nhiều thông tin hơn việc "nhìn giống thật". Nếu đặt một vật thể ảo vào phòng, vật thể đó phải bị tường thật che khuất khi đứng sau tường. Nếu thả một vật thể ảo xuống sàn, nó không được xuyên qua sàn hoặc đứng lơ lửng. Nếu có một agent ảo di chuyển trong cảnh, nó cần biết vùng nào có thể đi, vùng nào bị chặn, độ dốc nào còn chấp nhận được. 3DGS thuần túy không cung cấp các câu trả lời này dưới dạng dữ liệu mà engine AR có thể dùng trực tiếp.
+
+Có thể hình dung ba lỗi điển hình nếu dùng 3DGS như một asset render thuần trong AR:
+
+\begin{itemize}
+  \item \textbf{Occlusion sai:} vật thể ảo vẫn hiện ra dù đáng lẽ bị tường, bàn hoặc vật cản trong cảnh thật che khuất.
+  \item \textbf{Collision sai:} vật thể ảo xuyên qua sàn, tường hoặc đồ vật vì runtime không có collision surface.
+  \item \textbf{Navigation sai:} agent ảo không tìm được đường, hoặc tìm đường qua vùng không thể đi vì không có navigation mesh.
+\end{itemize}
+
+Vì vậy, bài toán của đề tài không phải là render 3DGS đẹp hơn. Bài toán là tạo thêm một lớp hình học từ dữ liệu 3DGS để phục vụ tương tác AR. Lớp hình học này không cần tái tạo mọi chi tiết thị giác, nhưng phải đủ ổn định, đúng tỷ lệ và đủ nhẹ để dùng trong runtime.
+
+\subsection{Geometry proxy cho AR}
+
+Trong đồ họa thời gian thực, geometry proxy là một mô hình hình học đơn giản hơn mô hình hiển thị nhưng giữ những đặc điểm cần thiết cho tính toán. Với AR, hai proxy quan trọng là occlusion mesh và navigation mesh. Occlusion mesh đại diện cho vật cản dùng để che khuất vật thể ảo hoặc kiểm tra va chạm. Navigation mesh mô tả vùng có thể di chuyển, thường được rút gọn từ bề mặt cảnh theo các tham số như chiều cao agent, bán kính agent, độ dốc tối đa và khả năng leo bậc.
+
+Occlusion mesh và navigation mesh có mục tiêu khác nhau. Occlusion mesh cần bám vào hình dạng vật cản đủ tốt để tạo cảm giác vật thể ảo nằm trong cảnh thật. Nó không nhất thiết phải có texture hoặc topology đẹp, nhưng phải có vị trí đúng và số tam giác vừa phải. Navigation mesh lại cần mô tả vùng đi được một cách ổn định. Một mesh đẹp về mặt hình ảnh chưa chắc tạo navmesh tốt; ví dụ mặt bàn có thể là mặt phẳng, nhưng về ngữ nghĩa không nhất thiết là vùng đi lại. Trong phạm vi đề tài, hệ thống tập trung vào geometry processing, chưa đặt mục tiêu semantic understanding để tự hiểu đây là bàn, ghế, tường hay cửa.
+
+Điều này dẫn đến một nguyên tắc thiết kế: dữ liệu render và dữ liệu tương tác nên được tách ra. \artifact{scene.sog} có thể giữ 3DGS để hiển thị cảnh. \artifact{occlusion.glb} và navmesh tùy chọn cung cấp geometry proxy cho AR. Tách hai lớp này giúp hệ thống tận dụng được ưu điểm thị giác của 3DGS mà vẫn có dữ liệu hình học cho runtime.
+
+\subsection{Yêu cầu của WebAR}
+
+WebAR đặt thêm các ràng buộc thực dụng. Trình duyệt và thiết bị di động thường có giới hạn về bộ nhớ, thời gian tải, GPU và network. Một mesh rất chi tiết có thể tốt cho kiểm tra hình học nhưng lại không phù hợp nếu làm \artifact{webar.zip} lớn, tải chậm hoặc render nặng. Do đó, output cho WebAR phải cân bằng giữa độ đúng hình học và độ nhẹ.
+
+Trong ngữ cảnh này, "mesh tốt" không đồng nghĩa với "mesh nhiều chi tiết nhất". Mesh tốt là mesh có đủ chi tiết ở vùng ảnh hưởng đến occlusion hoặc navigation, nhưng không tạo quá nhiều tam giác ở vùng ít quan trọng. Với occlusion, nhiều chi tiết nhỏ có thể không cần nếu vật thể ảo chỉ cần bị che đúng ở mức hình dáng tổng quát. Với navigation, mesh cần sạch, liên thông và có mặt walkable rõ hơn là mô tả mọi chi tiết nhỏ của bề mặt.
+
+WebAR cũng yêu cầu artifact có thể đóng gói và tái mở dễ dàng. Một pipeline nghiên cứu chỉ xuất mesh rời là chưa đủ; runtime cần biết file nào là scene render, file nào là occlusion mesh, có navmesh hay không, metric và warning nằm ở đâu. Vì vậy, ngoài thuật toán tái tạo geometry, hệ thống còn cần hợp đồng output rõ ràng để viewer hoặc công cụ tích hợp đọc được.
+
+\subsection{Voxelization và mesh extraction}
+
+Một cách tự nhiên để chuyển dữ liệu 3DGS sang geometry proxy là voxelization. Voxelization rời rạc hóa không gian thành lưới ô 3D và đánh dấu ô nào có khả năng bị chiếm dụng. Với 3DGS, trạng thái occupied của voxel có thể được suy ra từ đóng góp opacity của các Gaussian lân cận. Khi occupancy grid đã được tạo, hệ thống có thể fill, carve hoặc trích xuất bề mặt.
+
+Ưu điểm của voxelization là ổn định và dễ kiểm soát. Nó không đòi hỏi dữ liệu đầu vào phải có topology hoặc normal tốt. Nó cũng phù hợp với các thao tác hình học sau đó như fill vùng rỗng, carve theo capsule agent hoặc crop vùng occupied. Nhược điểm là phụ thuộc vào kích thước voxel. Voxel quá lớn làm mất chi tiết và tạo occlusion thô; voxel quá nhỏ làm tăng thời gian xử lý, bộ nhớ và số tam giác.
+
+Sau voxelization, mesh extraction chuyển biên giữa vùng occupied và empty thành mesh. Marching Cubes là thuật toán kinh điển cho bài toán dựng bề mặt từ scalar field hoặc occupancy grid \cite{MarchingCubes1987}. Thuật toán duyệt từng cell, xét trạng thái các đỉnh và dùng bảng tra để sinh tam giác xấp xỉ mặt iso-surface. Trong đề tài, hướng này phù hợp cho occlusion mesh vì nó biến dữ liệu rời rạc thành GLB có thể dùng trong runtime.
+
+\subsection{Reconstruction liên quan: SuGaR và Poisson}
+
+Ngoài voxelization, có các hướng reconstruction khác có thể chuyển dữ liệu hoặc điểm 3D thành mesh. SuGaR là phương pháp liên quan trực tiếp đến 3DGS, khai thác quan hệ giữa Gaussian và bề mặt để dựng mesh có độ trung thực cao hơn trong các cảnh phù hợp \cite{SuGaR2024}. Poisson Surface Reconstruction là hướng cổ điển hơn, dựng bề mặt từ point set có normal bằng cách giải bài toán trường vector/indicator function \cite{Poisson2006}.
+
+Trong báo cáo này, SuGaR và Poisson được xem là các phương pháp liên quan và là hướng adapter của hệ thống, không phải trọng tâm lý thuyết chính. Điểm quan trọng là chúng bổ sung cho voxel path. Voxel path có ưu điểm kiểm soát tốt, dễ tích hợp vào Rust core và phù hợp cho geometry proxy. Adapter SuGaR/Poisson mở ra khả năng dùng thuật toán ngoài khi cần chất lượng surface reconstruction khác, miễn là adapter trả về mesh theo hợp đồng mà pipeline có thể xử lý tiếp.
+
+\subsection{Navigation mesh và Recast}
+
+Navigation mesh là biểu diễn rút gọn của vùng có thể di chuyển. Thay vì tìm đường trên toàn bộ mesh chi tiết, runtime tìm đường trên tập polygon đã được lọc theo điều kiện walkable. Recast Navigation là một bộ công cụ phổ biến cho bài toán này \cite{Recast2009}; repository dùng rerecast, wrapper Rust của Recast \cite{rerecast2023}. Các tham số như \code{agentHeight}, \code{agentRadius}, \code{maxSlopeDegrees} và \code{walkableClimb} quyết định vùng nào được coi là đi được.
+
+Trong AR, navmesh có vai trò khác occlusion mesh nhưng quan trọng tương đương nếu có agent hoặc logic di chuyển. Occlusion mesh trả lời câu hỏi vật thể ảo có bị cảnh thật che không. Navigation mesh trả lời câu hỏi tác tử ảo có thể đi ở đâu. Hai loại mesh có thể cùng xuất phát từ collision mesh, nhưng tiêu chí đánh giá khác nhau. Một collision mesh có nhiều chi tiết nhỏ có thể gây nhiễu cho navmesh; ngược lại một navmesh sạch có thể bỏ qua nhiều chi tiết không cần thiết cho occlusion.
+
+\subsection{Nền tảng WebAR và desktop}
+
+Ứng dụng desktop dùng Tauri làm shell, React/Vite cho frontend và PlayCanvas cho preview/render phía web \cite{Tauri2024,PlayCanvas2024}. Tauri phù hợp vì cho phép giao diện web gọi command Rust cục bộ mà không cần server riêng. PlayCanvas phù hợp cho preview và WebAR viewer vì là engine WebGL/WebGPU-oriented, dễ đóng gói vào bundle HTML. \code{<model-viewer>} là tham chiếu quan trọng trong hệ sinh thái web cho cách hiển thị asset 3D/AR theo hướng đơn giản hóa tích hợp \cite{ModelViewer2024}.
+
+Với xử lý nặng, Rust core dựa vào CPU và GPU path. GPU compute dùng \code{wgpu}, một abstraction portable theo hướng WebGPU \cite{wgpu2024}. Cách tổ chức này phản ánh yêu cầu của đề tài: giao diện cần đủ thuận tiện để thao tác dữ liệu, nhưng xử lý chính phải nằm ở core có thể kiểm thử, benchmark và tái sử dụng.
+
+\begin{figure}[H]
+\centering
+\fbox{\begin{minipage}{0.9\textwidth}
+\centering
+\begin{tabularx}{0.86\textwidth}{>{\bfseries}p{3.2cm}X}
+\toprule
+3DGS render data & Tối ưu cho hiển thị, lưu Gaussian, opacity và màu.\\
+Geometry proxy & Tối ưu cho AR interaction, gồm occlusion mesh và navigation mesh.\\
+WebAR bundle & Tối ưu cho phân phối, cần nhẹ, tự chứa và có manifest.\\
+\bottomrule
+\end{tabularx}
+\end{minipage}}
+\caption{Ba lớp dữ liệu cần phân biệt khi đưa 3DGS vào AR.}
+\end{figure}

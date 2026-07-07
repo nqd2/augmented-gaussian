@@ -129,7 +129,7 @@ test('GUI calibration flow serializes recipe and calls Tauri commands', async ({
   expect(recipe.alignmentRecipe.floorNormal).toEqual([0, 0, 1]);
   expect(recipe.alignmentRecipe.origin).toEqual([0, 0, 0]);
   const config = JSON.parse(request.configJson);
-  expect(config.voxel.backend).toBe('cpu');
+  expect(config.voxel.backend).toBe('gpu');
   expect(config.voxel.size).toBe(0.05);
   expect(config.voxelFill.mode).toBe('none');
   expect(config.voxelCarve.enabled).toBe(false);

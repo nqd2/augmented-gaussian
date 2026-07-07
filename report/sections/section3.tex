@@ -1,0 +1,72 @@
+\section{Phân tích yêu cầu}
+
+\subsection{Từ khoảng trống 3DGS đến yêu cầu hệ thống}
+
+Yêu cầu của đề tài không nên được hiểu như danh sách chức năng rời rạc. Chúng xuất phát từ một khoảng trống cụ thể: 3DGS có thể render cảnh thật rất thuyết phục, nhưng chưa cung cấp dữ liệu hình học mà hệ AR cần để tương tác với cảnh. Vì vậy, yêu cầu hệ thống phải đi từ bản chất của bài toán AR: cần nhận biết vật cản, cần vùng đi lại, cần tọa độ và tỷ lệ hợp lý, cần output đủ nhẹ để chạy trên WebAR, và cần pipeline đủ tái lập để kiểm thử.
+
+Nếu chỉ dừng ở việc đọc file 3DGS và xuất một mesh, công cụ sẽ chưa giải quyết trọn vẹn bài toán. Mesh có thể sai tỷ lệ, quá nặng, không dùng được cho occlusion, không sinh được navmesh, hoặc không đóng gói được thành artifact mà viewer WebAR đọc được. Do đó, yêu cầu của đề tài được phân tích theo các nhóm năng lực thay vì chỉ theo nút bấm hoặc module.
+
+\subsection{Nhóm yêu cầu theo luận điểm nghiên cứu}
+
+\begin{longtable}{p{3.4cm}p{5.2cm}p{5.2cm}}
+\caption{Các nhóm yêu cầu suy ra từ bài toán 3DGS phục vụ AR.}\\
+\toprule
+\textbf{Nhóm yêu cầu} & \textbf{Vấn đề cần giải quyết} & \textbf{Hàm ý đối với hệ thống}\\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Nhóm yêu cầu} & \textbf{Vấn đề cần giải quyết} & \textbf{Hàm ý đối với hệ thống}\\
+\midrule
+\endhead
+Geometry awareness & 3DGS thiếu surface/collision rõ ràng dù render tốt. & Phải sinh geometry proxy từ \code{.ply/.splat}, không chỉ giữ dữ liệu render.\\
+Occlusion readiness & AR cần vật thể thật che đúng vật thể ảo. & Phải xuất occlusion mesh ở định dạng phổ biến như GLB.\\
+Navigation readiness & Agent hoặc logic di chuyển cần vùng walkable. & Phải có khả năng bake navmesh với tham số agent và cảnh báo khi rỗng.\\
+Scale/coordinate consistency & Scene tái tạo có thể sai scale, sai up axis hoặc lệch transform. & Phải có recipe căn chỉnh scale/up axis và bake transform vào dữ liệu.\\
+WebAR deliverability & Runtime web cần artifact nhẹ, dễ mở và tự chứa. & Phải đóng gói \artifact{scene.sog}, mesh, viewer và metadata thành bundle.\\
+Performance and lightweight output & Cảnh 3DGS có thể có rất nhiều splat, mesh quá nặng sẽ khó dùng. & Phải có GPU path, metric thời gian, triangle count và tỷ lệ dung lượng.\\
+Reproducibility & Kết quả cần kiểm tra lại được, không phụ thuộc thao tác thủ công khó truy vết. & Phải lưu config, recipe, manifest, warning và metric.\\
+Extensibility & Không một thuật toán reconstruction phù hợp mọi cảnh. & Phải hỗ trợ voxel path và adapter path cho SuGaR/Poisson.\\
+\bottomrule
+\end{longtable}
+
+Cách nhóm yêu cầu này phản ánh đúng bản chất nghiên cứu của đề tài. Geometry awareness là yêu cầu gốc. Occlusion readiness và navigation readiness là hai yêu cầu AR trực tiếp. WebAR deliverability và lightweight output là yêu cầu triển khai thực tế. Reproducibility bảo đảm báo cáo và demo có thể được kiểm chứng thay vì chỉ mô tả bằng quan sát.
+
+\subsection{Geometry awareness}
+
+Yêu cầu đầu tiên là hệ thống phải chuyển dữ liệu 3DGS thành dữ liệu hình học. Dữ liệu hình học ở đây không nhất thiết là reconstruction surface hoàn hảo cho mục đích trình diễn, mà là geometry proxy phục vụ AR. Điều này làm thay đổi tiêu chí đánh giá: mesh cần đúng vị trí, đúng tỷ lệ, đủ kín hoặc đủ ổn định cho occlusion/collision, và không quá nặng. Một mesh có visual detail cao nhưng rỗng, lệch scale hoặc quá nhiều tam giác vẫn không đạt yêu cầu AR.
+
+Từ yêu cầu này, hệ thống cần các bước đọc nguồn, chuẩn hóa dữ liệu splat, lọc dữ liệu lỗi, voxel hóa hoặc dùng adapter reconstruction, rồi xuất mesh. Các bước này phải làm việc với hai định dạng đầu vào chính là \code{.ply} và \code{.splat}. Đầu vào không được giả định là sạch tuyệt đối, vì dữ liệu 3DGS thực tế có thể có splat mờ, floater hoặc cụm nhiễu.
+
+\subsection{Occlusion readiness}
+
+Occlusion là một trong những yêu cầu cốt lõi của AR. Khi vật thể ảo được đặt vào cảnh thật, người dùng kỳ vọng vật thể đó bị môi trường thật che khuất đúng. Nếu không có occlusion mesh, vật thể ảo dễ nổi lên trên ảnh camera hoặc xuyên qua vật thật, làm mất cảm giác hiện diện. Vì vậy, hệ thống phải sinh được occlusion mesh ở định dạng runtime có thể đọc, cụ thể là GLB.
+
+Occlusion mesh không cần chứa texture hay vật liệu phức tạp. Nó chủ yếu cần bề mặt hình học. Tuy nhiên, nó phải đủ nhẹ để WebAR tải được và đủ ổn định để không gây artifact che khuất quá nhiều hoặc quá ít. Điều này dẫn đến yêu cầu có metric về số tam giác, kích thước file, geometric error và warning khi mesh rỗng. Các metric này giúp người vận hành đánh giá output thay vì chỉ thấy pipeline báo "done".
+
+\subsection{Navigation readiness}
+
+Navigation mesh là yêu cầu riêng so với occlusion. Nó không chỉ cần mesh tồn tại, mà cần vùng walkable hợp lý theo tham số agent. Một cảnh có thể có occlusion mesh tốt nhưng navmesh không dùng được nếu mặt đi lại bị chia cắt, bị chặn bởi voxel fill/carve sai hoặc up axis sai. Vì vậy, hệ thống cần cấu hình navmesh rõ ràng và cần cảnh báo khi navmesh sinh 0 tam giác.
+
+Yêu cầu navigation cũng cho thấy giới hạn của cách tiếp cận thuần hình học. Hệ thống có thể suy luận vùng walkable theo độ dốc, chiều cao và bán kính agent, nhưng chưa tự hiểu ngữ nghĩa vật thể. Do đó, trong phạm vi hiện tại, đề tài tập trung vào geometry processing; semantic understanding/segmentation chỉ nên được xem là hướng phát triển sau.
+
+\subsection{Scale và coordinate consistency}
+
+Một artifact AR chỉ có giá trị khi nó khớp hệ tọa độ và tỷ lệ với thế giới thật. Nếu scale sai, vật thể ảo có thể quá lớn hoặc quá nhỏ. Nếu up axis sai, navmesh có thể nằm trên tường thay vì sàn. Nếu transform chỉ áp dụng trong preview nhưng không bake vào nguồn, scene render và mesh export sẽ lệch nhau. Vì vậy, hệ thống cần cơ chế căn chỉnh và bake transform nhất quán.
+
+Trong codebase hiện tại, GUI dùng hai scale endpoints và khoảng cách thật để suy ra scale. Up axis được chọn từ danh sách trục. Scene transform gồm rotation XYZ và position XYZ được export vào nguồn tạm trước khi bake. Các quyết định này đáp ứng yêu cầu consistency ở mức thực dụng: người dùng có thể hiệu chỉnh cảnh mà không cần sửa file nguồn hoặc viết JSON thủ công.
+
+\subsection{WebAR deliverability và hiệu năng}
+
+Đầu ra của đề tài hướng tới WebAR nên yêu cầu hiệu năng và độ nhẹ là trọng tâm. Một pipeline offline có thể chấp nhận mesh rất nặng, nhưng WebAR cần bundle tải được, mở được và chạy được trên thiết bị có tài nguyên hạn chế. Vì vậy, hệ thống cần theo dõi kích thước \artifact{scene.sog}, \artifact{occlusion.glb}, \artifact{webar.zip}, số tam giác và thời gian xử lý.
+
+Hiệu năng không chỉ là tốc độ bake. Nó còn liên quan đến kích thước artifact và độ phức tạp runtime. GPU voxelization là đường chính để xử lý cảnh lớn nhanh hơn, nhưng CPU path vẫn cần tồn tại cho kiểm thử, fallback và so sánh parity. Cấu trúc metric trong manifest giúp đánh giá trade-off này: voxel size nhỏ hơn có thể tăng độ chi tiết nhưng làm mesh nặng hơn; backend GPU có thể nhanh hơn nhưng cần kiểm tra sai khác với CPU khi bật compare.
+
+\subsection{Tính tái lập và khả năng kiểm chứng}
+
+Một yêu cầu quan trọng của báo cáo nghiên cứu là kết quả phải có thể tái lập. Với pipeline xử lý 3D, nếu chỉ ghi rằng "kết quả tốt" mà không lưu config, recipe và metric thì rất khó kiểm chứng. Vì vậy, mỗi lượt bake cần để lại dấu vết: input path, source stats, alignment, process config, artifact list, timing, triangle count, size ratio và warning.
+
+Manifest đóng vai trò trung tâm cho yêu cầu này. Nó không chỉ phục vụ viewer mà còn phục vụ đánh giá. Khi có benchmark chính thức, bảng kết quả có thể được trích từ manifest hoặc summary CSV thay vì nhập tay. Điều này đặc biệt quan trọng vì phần thực nghiệm định lượng của đề tài chưa chốt; báo cáo cần giữ ranh giới rõ giữa cơ chế đo đã có và số liệu chưa được xác minh.
+
+\subsection{Phạm vi yêu cầu}
+
+Trong phạm vi hiện tại, đề tài không đặt mục tiêu xây dựng một hệ AR production đầy đủ. Hệ thống tập trung vào công cụ xử lý dữ liệu 3DGS thành artifact hình học phục vụ AR. Các chức năng như semantic segmentation, nhận diện vật thể, tối ưu runtime đa thiết bị hoặc authoring scene phức tạp nằm ngoài phạm vi chính. Việc giới hạn phạm vi này giúp đề tài tập trung vào khoảng trống quan trọng nhất: từ 3DGS render data sang geometry proxy và WebAR bundle có thể kiểm chứng.

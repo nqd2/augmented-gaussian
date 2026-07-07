@@ -17,7 +17,7 @@ describe('calibration profile defaults', () => {
     const recipe = makeAlignmentRecipe(2, defaultScalePoints);
 
     expect(defaultGeometryProfile).toBe('object-prop');
-    expect(config.voxel).toEqual({ backend: 'cpu', size: 0.05, opacityThreshold: 0.1 });
+    expect(config.voxel).toEqual({ backend: 'gpu', size: 0.05, opacityThreshold: 0.1 });
     expect(config.voxelFill).toEqual({ mode: 'none', dilationSize: 0 });
     expect(config.voxelCarve.enabled).toBe(false);
     expect(config.reconstruction).toEqual({

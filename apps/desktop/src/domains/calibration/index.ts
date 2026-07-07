@@ -20,6 +20,7 @@ const geometryProfiles = new Set<GeometryProfile>([
   'outdoor-terrain',
 ]);
 const reconstructionMethods = new Set<ReconstructionMethod>(['voxel', 'sugar', 'poisson']);
+const defaultVoxelConfig = { backend: 'gpu', size: 0.05, opacityThreshold: 0.1 };
 
 export function normalizeGeometryProfile(value: unknown): GeometryProfile {
   return typeof value === 'string' && geometryProfiles.has(value as GeometryProfile)
@@ -97,7 +98,7 @@ export function makeProcessConfig(
   if (profile === 'outdoor-terrain') {
     return {
       reconstruction,
-      voxel: { backend: 'cpu', size: 0.05, opacityThreshold: 0.1 },
+      voxel: defaultVoxelConfig,
       voxelFill: { mode: 'floor-fill', dilationSize: 0 },
       voxelCarve: { enabled: false, agentHeight: 1.6, agentRadius: 0.2, seedPos },
       navmesh: { ...defaultNavmeshConfig, enabled: false },
@@ -107,7 +108,7 @@ export function makeProcessConfig(
   if (profile === 'interior-room') {
     return {
       reconstruction,
-      voxel: { backend: 'cpu', size: 0.05, opacityThreshold: 0.1 },
+      voxel: defaultVoxelConfig,
       voxelFill: { mode: 'exterior-fill', dilationSize: 1.6 },
       voxelCarve: { enabled: true, agentHeight: 1.6, agentRadius: 0.2, seedPos },
       navmesh: { ...defaultNavmeshConfig, enabled: true },
@@ -116,7 +117,7 @@ export function makeProcessConfig(
   }
   return {
     reconstruction,
-    voxel: { backend: 'cpu', size: 0.05, opacityThreshold: 0.1 },
+    voxel: defaultVoxelConfig,
     voxelFill: { mode: 'none', dilationSize: 0 },
     voxelCarve: { enabled: false, agentHeight: 1.6, agentRadius: 0.2, seedPos },
     navmesh: { ...defaultNavmeshConfig, enabled: false },

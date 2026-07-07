@@ -1,0 +1,35 @@
+\section{Hạn chế và hướng phát triển}
+
+\subsection{Hạn chế hiện tại}
+
+Hạn chế đầu tiên là calibration vẫn phụ thuộc vào người dùng. GUI đã đơn giản hóa workflow bằng hai scale endpoints và up axis, nhưng nếu người dùng chọn sai điểm hoặc sai trục, artifact sẽ sai. Hệ thống chưa có thuật toán tự động phát hiện mặt sàn đáng tin cậy từ toàn bộ point cloud hoặc Gaussian distribution. \code{floorNormal} trong recipe hiện được suy ra từ up axis, không phải kết quả plane fitting.
+
+Hạn chế thứ hai là chất lượng mesh phụ thuộc mạnh vào voxel size, opacity threshold và profile. Một cấu hình phù hợp với object prop có thể không phù hợp với room-scale scene. Exterior fill và carve giúp cảnh phòng nhưng có thể làm sai với object nhỏ. Floor fill hữu ích cho địa hình nhưng không đủ cho cảnh nhiều vật cản phức tạp. Do đó, profile hiện tại nên được xem là preset ban đầu, không phải giải pháp tự động tối ưu cho mọi cảnh.
+
+Hạn chế thứ ba là adapter SuGaR/Poisson mới ở mức contract tích hợp. Hệ thống có selector, adapter command, request/response và validate mesh, nhưng chất lượng phụ thuộc vào adapter cụ thể và môi trường chạy ngoài. Để biến đây thành production feature, cần chuẩn hóa adapter, log lỗi chi tiết hơn, và có test với dataset thực.
+
+Hạn chế thứ tư là benchmark định lượng chưa chốt. Codebase có lệnh benchmark và schema metric, nhưng báo cáo này chưa đưa số đo cuối. Điều đó làm phần đánh giá hiệu năng còn ở mức phương pháp. Tuy nhiên, đây là lựa chọn đúng hơn so với đưa số liệu chưa được xác minh.
+
+\subsection{Rủi ro kỹ thuật}
+
+Rủi ro kỹ thuật đáng chú ý nhất là GPU portability. \code{wgpu} giúp giảm phụ thuộc platform, nhưng desktop thực tế vẫn có khác biệt driver, adapter và quyền truy cập GPU. Nếu GPU path thất bại, người dùng cần cách chuyển sang CPU hoặc nhận thông báo rõ ràng. Vì GUI hiện mặc định GPU, phần fallback UX nên được cải thiện trong giai đoạn tiếp theo.
+
+Rủi ro thứ hai là mesh semantic. Occlusion mesh và navmesh yêu cầu ý nghĩa hình học khác nhau, trong khi pipeline hiện chủ yếu dựa trên hình học tổng quát. Một bề mặt dựng tốt cho occlusion chưa chắc là mặt đi được. Ví dụ mặt bàn, ghế hoặc kệ có thể bị hiểu nhầm là vùng walkable nếu chỉ xét độ dốc. Để giải quyết, cần thêm semantic filtering, user annotation hoặc heuristic theo profile.
+
+Rủi ro thứ ba là dữ liệu nguồn có nhiễu và floater. 3DGS từ ảnh thiếu hoặc camera path kém có thể sinh cụm Gaussian rời rạc, mờ hoặc nằm sai vị trí. Filter cluster và floater contribution có thể xử lý một phần, nhưng nếu bật sai có thể xóa chi tiết. Vì vậy workflow cần cơ chế preview trước/sau filter hoặc undo/redo ở GUI trong tương lai.
+
+\subsection{Hướng phát triển ngắn hạn}
+
+Hướng phát triển ngắn hạn gồm bốn nhóm. Nhóm thứ nhất là hoàn thiện GPU fallback: nếu GPU voxelization lỗi, GUI nên đề xuất chạy CPU hoặc tự retry theo cấu hình người dùng. Nhóm thứ hai là cải thiện profile UI: hiển thị ý nghĩa của object prop, interior room và outdoor terrain bằng preview ngắn, đồng thời cho phép advanced settings khi cần. Nhóm thứ ba là bổ sung benchmark chính thức với dataset đại diện. Nhóm thứ tư là tăng trực quan hóa output: overlay occlusion mesh và navmesh lên preview để người dùng phát hiện lỗi trước khi export ZIP.
+
+\subsection{Hướng phát triển dài hạn}
+
+Về dài hạn, hệ thống có thể mở rộng theo ba hướng. Hướng đầu tiên là automatic geometry understanding: nhận diện mặt sàn, tường, vật cản và vùng đi lại từ dữ liệu 3DGS hoặc từ dữ liệu phụ trợ. Hướng thứ hai là multi-resolution output: tạo nhiều mức chi tiết cho occlusion mesh, navmesh và render scene để phù hợp thiết bị AR khác nhau. Hướng thứ ba là tích hợp sâu hơn với runtime AR, ví dụ xuất metadata anchors, coordinate frame và occlusion material theo chuẩn của engine đích.
+
+Ngoài ra, adapter SuGaR/Poisson có thể được chuẩn hóa thành plugin chính thức. Mỗi plugin nên khai báo capability, input requirement, output schema, version và môi trường chạy. Khi đó GUI có thể phát hiện adapter, hiển thị trạng thái và tránh yêu cầu người dùng nhập command thủ công.
+
+\subsection{Định hướng đánh giá tiếp theo}
+
+Bước đánh giá tiếp theo cần có dataset thật từ các bối cảnh khác nhau: vật thể nhỏ, phòng trong nhà, hành lang hoặc địa hình ngoài trời. Mỗi dataset nên có ảnh preview, file nguồn, profile, config, artifact, manifest và nhận xét trực quan. Nên chạy mỗi cấu hình ít nhất ba lần để giảm nhiễu thời gian, ghi rõ phần cứng GPU/CPU, driver và hệ điều hành. Với AR, nên có thêm kiểm tra runtime: thời gian tải bundle, FPS viewer, độ đúng occlusion khi đặt vật thể ảo và khả năng navigation.
+
+Khi có số liệu, phần thực nghiệm có thể bổ sung biểu đồ so sánh CPU/GPU, bảng dung lượng artifact và hình chụp overlay. Những bổ sung này sẽ làm báo cáo mạnh hơn mà không cần thay đổi cấu trúc chính.

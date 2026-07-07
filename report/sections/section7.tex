@@ -1,0 +1,99 @@
+\section{Đánh giá và kiểm thử}
+
+\subsection{Nguyên tắc đánh giá}
+
+Đánh giá công cụ 3DGS-to-AR cần phân biệt ba loại kết quả. Loại thứ nhất là kết quả chức năng: pipeline có đọc được nguồn, sinh artifact và manifest đúng hợp đồng hay không. Loại thứ hai là kết quả hình học: mesh có đủ ổn định, đúng tỷ lệ, không rỗng và phù hợp với mục đích occlusion/navmesh hay không. Loại thứ ba là kết quả hiệu năng: thời gian xử lý, dung lượng file và lợi ích GPU so với CPU. Báo cáo hiện tại chỉ trình bày phương pháp, chỉ số và kiểm thử có trong codebase; số liệu benchmark lớn chưa được chốt nên không đưa bảng tốc độ hoặc tỷ lệ tối ưu hóa như kết quả cuối.
+
+Nguyên tắc này quan trọng vì report cũ đã có xu hướng nêu kết quả quá mạnh trong khi dữ liệu chưa đủ. Với đề tài nghiên cứu nghiêm túc, phần đánh giá phải nói rõ cái gì đã được kiểm thử, cái gì là cơ chế đo, và cái gì đang chờ chạy benchmark chính thức.
+
+\subsection{Kiểm thử Rust core}
+
+Rust core có các test cho từng module xử lý. Nhóm alignment kiểm tra scale calibration, floor alignment và origin. Nhóm filter kiểm tra loại dữ liệu NaN, opacity, vùng box/sphere, cluster và floater contribution. Nhóm voxel kiểm tra voxelization, fill và carve. Nhóm mesh kiểm tra extraction và merge. Nhóm navmesh kiểm tra trường hợp sàn phẳng và tường đứng. Nhóm pipeline kiểm tra export artifact tùy chọn, seed sau alignment và profile object giữ splat.
+
+Các test này bảo vệ logic nền tảng. Nếu alignment sai, mọi artifact phía sau sẽ lệch. Nếu filter sai, dữ liệu có thể bị mất hoặc giữ nhiễu quá nhiều. Nếu mesh/navmesh sai, GUI vẫn có thể báo bake done nhưng artifact không dùng được. Vì vậy kiểm thử core là lớp bảo vệ đầu tiên.
+
+\begin{table}[H]
+\centering
+\caption{Các nhóm kiểm thử core cần duy trì.}
+\begin{tabularx}{\textwidth}{p{3.2cm}p{5cm}X}
+\toprule
+\textbf{Nhóm} & \textbf{Mục tiêu} & \textbf{Rủi ro nếu thiếu}\\
+\midrule
+Alignment & Kiểm tra scale, up axis, origin và transform downstream & Artifact sai tỷ lệ hoặc sai hướng.\\
+Filters & Kiểm tra loại dữ liệu lỗi/nhiễu & Mesh rỗng hoặc còn floater nhiều.\\
+Voxel & Kiểm tra occupancy CPU/GPU, fill, carve & Collision mesh sai hoặc quá nặng.\\
+Mesh & Kiểm tra faces/smooth extraction & GLB lỗi, số tam giác bất thường.\\
+NavMesh & Kiểm tra vùng walkable & Agent ảo không tìm đường được.\\
+Pipeline & Kiểm tra export và manifest & Bundle thiếu file hoặc metadata sai.\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Kiểm thử GUI}
+
+Frontend có unit test cho calibration profile. Test kiểm tra profile mặc định là \code{object-prop}, process config có voxel backend GPU, fill/carve/navmesh đúng theo profile, reconstruction method được normalize, và adapter command chỉ được yêu cầu với SuGaR/Poisson. Playwright e2e kiểm tra GUI serialize recipe và config đúng khi người dùng load source, đặt scale endpoints, chọn up axis, chọn reconstruction method, bake và save bundle.
+
+E2E test cũng kiểm tra progress event và cancel state. Khi job đang chạy, Load và Bake bị khóa, Cancel còn enabled. Với source loading, test kiểm tra có thể hủy khi fetch hoặc decode đang pending. Với file lớn, test kiểm tra app có thể dùng preview path và không bật dialog xác nhận thừa. Những test này không đo chất lượng mesh, nhưng bảo vệ workflow người dùng và contract giữa GUI với Tauri.
+
+\subsection{Benchmark và metric}
+
+Thư mục \code{docs/evaluation} mô tả lệnh generate benchmark scene và chạy benchmark. CLI có thể tạo scene synthetic rồi chạy \code{augmented-gaussian-cli benchmark}. Config benchmark nằm ở \code{docs/evaluation/benchmark-config.json}. Khi chạy, output dự kiến gồm \artifact{summary.json} và \artifact{summary.csv}. Các metric được track gồm thời gian từng stage, backend voxel, CPU/GPU mismatch, kích thước source/SOG/GLB/ZIP, tỷ lệ dung lượng, số tam giác và geometric error.
+
+\begin{lstlisting}[language={}]
+cargo run -p augmented-gaussian-cli -- generate-bench-scenes --out target/bench-scenes
+cargo run -p augmented-gaussian-cli -- benchmark \
+  --input target/bench-scenes/bench-500000.splat \
+  --out docs/evaluation/results/bench-500k \
+  --config docs/evaluation/benchmark-config.json \
+  --compare-cpu-gpu
+\end{lstlisting}
+
+Trong lần hoàn thiện báo cáo này, chưa chạy và chốt bộ số benchmark chính thức. Vì vậy các bảng kết quả định lượng để trống theo nghĩa học thuật: hệ thống có cơ chế đo, nhưng báo cáo không khẳng định tốc độ hoặc compression ratio khi chưa có dữ liệu được xác minh.
+
+\subsection{Chỉ số hình học}
+
+Manifest có nhóm geometric error gồm sample count, mean, RMS và P95. Ý nghĩa của nhóm này là so sánh mesh với splat centers ở mức xấp xỉ. Đây không phải metric hoàn hảo cho chất lượng occlusion, vì splat center không luôn nằm đúng trên bề mặt; tuy nhiên nó cung cấp tín hiệu định lượng ban đầu. Với benchmark chính thức, nên báo cáo geometric error cùng voxel size và triangle count để người đọc hiểu trade-off giữa độ chi tiết và kích thước mesh.
+
+Một chỉ số quan trọng khác là số tam giác trước và sau merge. Nếu mesh có quá nhiều tam giác, WebAR có thể tải chậm hoặc render tốn tài nguyên. Nếu quá ít tam giác, occlusion có thể thô. Vì vậy không nên chỉ tối ưu một chiều theo kích thước file; phải nhìn đồng thời collision triangles, geometric error, visual inspection và hiệu năng runtime.
+
+\subsection{Đánh giá artifact}
+
+Artifact output cần được kiểm tra theo checklist:
+
+\begin{itemize}
+  \item \artifact{manifest.json} tồn tại và khai báo đúng các artifact.
+  \item \artifact{scene.sog} tồn tại và có kích thước khác 0.
+  \item \artifact{occlusion.glb} tồn tại, load được bằng viewer hoặc validator, mesh không rỗng.
+  \item \artifact{webar.zip} chứa \artifact{index.html}, PlayCanvas runtime, scene và mesh.
+  \item Nếu navmesh enabled, \artifact{navmesh.glb} và \artifact{navmesh.bin} tồn tại khi manifest khai báo.
+  \item Nếu navmesh disabled hoặc rỗng, output directory không còn file navmesh stale.
+  \item Warning trong manifest được xem xét, không bỏ qua.
+\end{itemize}
+
+Checklist này phù hợp với mục tiêu sản phẩm: người dùng cuối không chỉ cần thuật toán chạy xong, mà cần bundle có thể chuyển giao và mở lại.
+
+\subsection{Đánh giá trực quan}
+
+Vì bài toán liên quan AR, kiểm tra trực quan vẫn cần thiết. Sau mỗi thay đổi lớn, nên render hoặc mở viewer để so sánh \artifact{scene.sog} với \artifact{occlusion.glb}. Các lỗi thường gặp gồm mesh bị xoay 90 độ, scale sai, occlusion mesh lệch khỏi scene, navmesh nằm trên tường thay vì sàn, hoặc artifact quá thô do voxel size lớn. Những lỗi này có thể không lộ qua unit test nếu fixture quá nhỏ.
+
+Đánh giá trực quan nên kết hợp với metric. Nếu visual đúng nhưng triangle count quá cao, cần giảm mesh hoặc tăng voxel size. Nếu metric đẹp nhưng visual lệch, cần xem lại calibration. Nếu GPU nhanh nhưng mismatch cao so với CPU, cần điều tra shader hoặc precision.
+
+\subsection{Kế hoạch cập nhật số liệu}
+
+Khi bước thực nghiệm được tiến hành, báo cáo nên bổ sung một bảng kết quả có các cột: dataset, số splat, voxel size, backend, decode ms, voxel ms, mesh ms, export ms, collision triangles, GLB size, ZIP size, geometric RMS và warning. Nên có ít nhất một cảnh object, một cảnh interior và một cảnh outdoor/terrain nếu dữ liệu có sẵn. Mỗi cảnh cần ghi rõ source, profile, reconstruction method và adapter command nếu dùng SuGaR/Poisson.
+
+\begin{table}[H]
+\centering
+\caption{Mẫu bảng kết quả sẽ điền sau khi benchmark được chốt.}
+\begin{tabularx}{\textwidth}{p{2.4cm}p{1.8cm}p{1.8cm}p{1.8cm}p{1.8cm}X}
+\toprule
+\textbf{Dataset} & \textbf{Splats} & \textbf{Backend} & \textbf{Voxel ms} & \textbf{Triangles} & \textbf{Ghi chú}\\
+\midrule
+Object & \todoexp & GPU & \todoexp & \todoexp & Kiểm tra occlusion prop.\\
+Interior & \todoexp & GPU & \todoexp & \todoexp & Kiểm tra carve và navmesh.\\
+Terrain & \todoexp & GPU & \todoexp & \todoexp & Kiểm tra floor-fill.\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Việc để rõ \todoexp{} tốt hơn điền số không có căn cứ. Khi có output từ CLI benchmark, bảng này có thể cập nhật trực tiếp từ \artifact{summary.csv}.

@@ -1,0 +1,417 @@
+% See this: https://tex.stackexchange.com/questions/12806/guidelines-for-customizing-biblatex-styles
+% Reference documentations:
+% * Source types: https://bibtex.eu/types/inbook/#the-inbook-entry-type
+% * Biblatex: (search the biblatex reference manual...)
+\ProvidesFile{jstarticle.bbx}[2024/03/19 JST Article bibliography style]
+
+\ExecuteBibliographyOptions{maxbibnames=999}
+% Punctuation and spacing configuration [[[
+% =====================================
+\renewcommand*{\newblockpunct}{\addcomma\addspace}%
+\renewcommand*{\newunitpunct}{\addcomma\addspace}%
+% \setlength\bibhang{0pt}%
+\setlength\bibitemsep{\parskip}%
+% \setlength\bibparsep{0pt}%
+% \setlength\bibnamesep{0pt}%
+% \setlength\bibinitsep{0pt}%
+% ]]]
+
+% Bib environment [[[
+% ===============
+% Use enumerate
+% \usepackage{enumitem}
+% \newlist{mybiblist}{itemize}{1}
+% \setlist[mybiblist, 1]{
+% 	label={},
+% 	leftmargin=\parindent,
+% 	labelwidth=!,
+% 	labelindent=0pt,
+% 	itemindent=0pt,
+% }
+
+\usepackage{enumitem}
+\newlist{mybiblist}{itemize}{1}
+\setlist[mybiblist, 1]{
+	label={},
+	leftmargin=0.75cm,  % <--- Đã thay đổi từ \parindent thành 0.75cm
+	labelwidth=!,       % Tự động tính toán chiều rộng của nhãn
+	labelindent=0pt,    % Nhãn bắt đầu sát lề trái trang
+	itemindent=0pt,     % Dòng thứ 2 trở đi sẽ thẳng hàng với text dòng 1 
+	labelsep=0.5em,     % Khoảng cách giữa dấu đóng ngoặc ] và tên tác giả
+	align=left,         % Căn chỉnh nhãn bên trong khoảng 0.75cm (tùy chọn)
+}
+
+\DeclareFieldFormat{labelnumber}{#1}
+\defbibenvironment{bibliography}{\mybiblist}{\endmybiblist}
+{\item[{[\thefield{labelnumber}]}]}
+% \defbibenvironment{bibliography}
+% {\list
+% 	{}
+% 	{\setlength{\leftmargin}{\parindent}%
+% 		\setlength{\itemindent}{0pt}%
+% 		\setlength{\itemsep}{\parskip}%
+% 		\setlength{\parsep}{\parskip}}}
+% {\endlist}
+% {\item[{[\thefield{labelnumber}]}]} % Item code
+
+% \RequireBibliographyStyle{numeric}
+% ]]]
+
+% Data Model [[[
+% =================================================
+\DeclareDatamodelFields[type=field, datatype=literal]{section}
+\DeclareDatamodelFields[type=field, datatype=literal]{chaptertitle}
+\DeclareDatamodelFields[type=field, datatype=literal]{unpublished}
+\DeclareDatamodelEntryfields[section]{book}
+\DeclareDatamodelEntryfields[chaptertitle]{book}
+\DeclareDatamodelEntryfields[volume]{online}
+\DeclareDatamodelEntryfields[issue]{online}
+\DeclareDatamodelEntryfields[number]{online}
+\DeclareDatamodelEntryfields[unpublished]{inproceedings}
+% \DeclareDatamodelEntryfields[institution]{report}
+% \DeclareDatamodelEntryfields[location]{report}
+
+% \DeclareListAlias[manual]{publisher}{institution}
+% \DeclareListAlias[manual]{publisher}{organization}
+% \DeclareFieldAlias[manual]{publisher}{institution}
+% \DeclareFieldAlias[manual]{publisher}{organization}
+% \DeclareFieldAlias[manual]{institution}{publisher}
+% \DeclareFieldAlias[manual]{organization}{publisher}
+% ]]]
+
+% Format: macros [[[
+% =======
+\newcommand{\rawfield}[1]{\printfield[noformat]{#1}}
+
+\newbibmacro*{vol+issue}{%
+	\iffieldundef{vol}{}{%
+		\thefield{vol}%
+		\iffieldundef{issue}{}{/\thefield{issue}}%
+	}
+}
+
+\newbibmacro{jst-datetime}{%
+}
+
+\renewbibmacro*{urldate}{%
+	\iffieldundef{urlyear}{}{%
+		Accessed on:\addspace%
+		\mkbibmonth{\thefield{urlmonth}}\addspace%
+		\thefield{urlday}\newunit\newblock%
+		\thefield{urlyear}%
+	}%
+}
+
+\newbibmacro{month-year}{%
+	\mkbibmonth{\thefield{month}}%
+	\addspace\thefield{day}%
+	\newunit\newblock%
+	\thefield{year}}
+
+
+\newbibmacro{doiurl}{%
+	\begingroup%
+	\iffieldundef{doi}%
+	{\iffieldundef{url}%
+		{}%
+		{\\\url{\thefield{url}}}%
+	}%
+	{\\\url{\thefield{doi}}}%
+	\endgroup%
+}
+
+\renewbibmacro*{journal}{%
+	\iffieldundef{journaltitle}
+	{}
+	{%
+		\printtext[journaltitle]{%
+			\printfield{journaltitle}%
+			\printfield{journalsubtitle}%
+		}%
+	}%
+}
+
+% Italic et al
+% Based on name:andothers from biblatex.def
+% https://tex.stackexchange.com/questions/40798/how-do-i-get-et-al-to-appear-in-italics-when-using-textcite-or-citeauthor-w
+\renewbibmacro*{name:andothers}{%
+	\ifboolexpr{%
+		test {\ifnumequal{\value{listcount}}{\value{liststop}}}%
+		and%
+		test \ifmorenames%
+	}
+	{\ifnumgreater{\value{liststop}}{1}
+		{\finalandcomma}
+		{}%
+		\andothersdelim\bibstring[\emph]{andothers}}
+	{}}
+% ]]]
+
+% Driver: book [[[
+% ===========
+\DeclareFieldFormat[book]{title}{#1}
+\DeclareFieldFormat[book]{subtitle}{#1}
+\DeclareFieldFormat[book]{location}{#1}
+\DeclareFieldFormat[book]{publisher}{#1}
+\DeclareFieldFormat[book]{month}{\mkbibmonth{#1}}
+\DeclareFieldFormat[book]{chapter}{ch.\addnbthinspace{}#1}
+\DeclareFieldFormat[book]{section}{sec.\addnbthinspace{}#1}
+\DeclareFieldFormat[book]{volume}{vol\adddot\addnbthinspace{}#1}
+
+\DeclareBibliographyDriver{book}{%
+	\printnames{author}\newblock
+	\iffieldundef{chaptertitle}{}{
+		\printfield{title}\newunit
+		\printtext{in}\addspace}
+	\printfield{title}\newblock
+	\printfield{edition}\newunit
+	\printfield{volume}\newblock
+	\printnames{editor}\newblock
+	\iffieldundef{location}{}
+	{\printlist{location}\printtext{:}\newunit}%
+	\printlist{publisher}\newblock%
+	\printfield{year}\newunit%
+	\iffieldundef{chapter}{}{\printfield{chapter}\newunit\newblock}%
+	\iffieldundef{section}{}{\printfield{section}\newunit\newblock}%
+	% Bỏ cái nào???
+	\printfield{pages}\newunit\newblock%
+	\printfield{pagetotal}%
+	\finentry%
+}
+\DeclareBibliographyAlias{inbook}{book}
+%]]]
+
+% Driver: article/periodicals [[[
+% ==============
+\DeclareFieldFormat[article]{title}{#1}
+\DeclareFieldFormat[article]{doi}{\url{#1}}
+\DeclareFieldFormat[article]{volume}{vol.\addnbthinspace{}#1}
+\DeclareFieldFormat[article]{journaltitle}{#1}
+\DeclareFieldFormat[article]{journalsubtitle}{#1}
+\DeclareFieldFormat[article]{number}{no.\addnbthinspace{}#1}
+\DeclareFieldFormat[article]{month}{\mkbibmonth{#1}}
+\DeclareFieldFormat[article]{year}{#1}
+
+\DeclareBibliographyDriver{article}{%
+	\printnames{author}\newunit\newblock
+	\printfield{title}\newunit\newblock
+	\usebibmacro{journal}\newunit
+	\printfield{volume}\newunit
+	\printfield{number}\newunit
+	\printfield{pages}\newunit\newblock
+	\printfield{month}\addspace
+	\printfield{year}\newunit
+	\printfield[any]{date}\newunit\newblock
+	\iffieldundef{doi}{
+		\iffieldundef{url}%
+		{\newblock}%
+		{.\\\url{\thefield{url}}}%
+	}%
+	{.\\\url{\thefield{doi}}}%
+	\iffieldundef{note}{}{\newblock\printfield{note}}
+	\finentry%
+}
+%]]]
+
+% Driver: report/techreport [[[
+% ========================
+\DeclareBibliographyDriver{report}{%
+	\printnames[prefix]{author}\newblock
+	\printfield[noformat]{title}\newblock
+	\printlist[noformat]{institution}\newblock
+	\printlist[noformat]{location}\newblock
+	\iffieldundef{isrn}{}{
+		\printfield[noformat]{type}
+		\printfield[noformat]{isrn}\newblock}
+	\usebibmacro{month-year}\newblock
+	\finentry
+}
+% ]]]
+
+% Driver: manual/handbook [[[
+% =========================
+% [11] Name of Manual/Handbook, x ed., Abbrev. Name of Co., City of Co., Abbrev. State, Country, year, pp. xxx-xxx.
+\DeclareBibliographyDriver{manual}{%
+	\printfield{title}\newblock%
+	\printfield{edition}\newblock%
+	\printlist{publisher}\newblock%
+	\printlist{institution}\newunit%
+	\printlist{organization}\newunit%
+	\printlist{location}\newblock%
+	\printfield{year}\newblock%
+	\printfield{pages}%
+	\finentry%
+}
+% ]]]
+
+% Driver: online [[[
+% ======
+
+% J. K. Author. Title of report, Company. City, State, Country. Rep. no., (optional: vol./issue), Date. [Online] Available: site/path/file 
+\DeclareFieldFormat[online]{url}{Available:\addspace\url{#1}}
+\DeclareBibliographyDriver{online}{%
+	\printnames{author}\newblock%
+	\printfield{title}\newblock%
+	\printlist{publisher}\newblock%
+	\printlist{institution}\newblock%
+	\printlist{organization}\newblock%
+	\printlist{location}\newblock%
+	\printfield{isrn}\newblock%
+	\iffieldundef{volume}{}{
+		\printfield{volume}%
+		\iffieldundef{issue}
+		{\newblock}{/\printfield{issue}\newblock}}%
+	\usebibmacro{date}%
+	% This is very weird, but it is a dot here
+	% instead of a comma.
+	\finentry\addspace%
+	\printtext{[Online]}\addspace%
+	\iffieldundef{url}
+	{\printfield{howpublished}}% sometime the url is howpublished
+	{\printfield{url}}%
+	% Also weird, it is capitalized here, but the template is a comma...
+	\finentry\addspace%
+	\usebibmacro{urldate}%
+	\finentry%
+}
+\DeclareBibliographyAlias{misc}{online}
+% ]]]
+
+% Driver: inproceedings [[[
+% [19] J. K. Author, Title of paper, in Abbreviated Name of Conf., City of Conf., Abbrev. State (if given), Country, year, pp. xxxxxx.
+\DeclareFieldFormat[inproceedings]{author}{#1}
+\DeclareFieldFormat[inproceedings]{title}{#1}
+\DeclareFieldFormat[inproceedings]{booktitle}{%
+	\iffieldundef{unpublished}{in #1}{presented at #1}}
+\DeclareBibliographyDriver{inproceedings}{%
+	\printnames{author}\newblock%
+	\printfield{title}\newblock%
+	\printfield{booktitle}\newblock%
+	\printlist{location}\newblock%
+	\usebibmacro{date}\newblock%
+	\printfield{pages}%
+	\finentry%
+}
+% ]]]
+
+% Driver: patents [[[
+\DeclareFieldFormat[patent]{title}{#1}%
+\DeclareFieldFormat[patent]{number}{#1}%
+\DeclareBibliographyDriver{patent}{%
+	\printnames{author}\newblock%
+	\printfield{title}\newblock%
+	\printfield{type}\addspace\printfield{number}\newblock%
+	\usebibmacro{date}%
+	\finentry
+}
+%]]]
+
+% Driver: theses/dissertation [[[
+% [Master thesis] J. K. Author, Title of thesis, M.S. thesis, Abbrev. Dept., Abbrev. Univ., City of Univ., Abbrev. State, year.
+\DeclareFieldFormat[thesis]{title}{#1}
+\DeclareBibliographyDriver{thesis}{%
+	\printnames{author}\newblock%
+	\printfield{title}\newblock%
+	\printfield{type}\newblock%
+	\printlist{institution}\newblock%
+	\printlist{location}\newblock%
+	\usebibmacro{date}%
+	\finentry%
+}
+%]]]
+
+% Driver: standards [[[
+% ====================
+\DeclareFieldFormat[standard]{title}{#1}
+\DeclareFieldFormat[standard]{number}{#1}
+\DeclareFieldFormat[standard]{location}{#1}
+\DeclareFieldFormat[standard]{date}{#1}
+\DeclareFieldFormat[standard]{author}{#1}
+\DeclareBibliographyDriver{standard}{%
+	\usebibmacro{bibindex}%
+	\printfield{title}\newunit\newblock%
+	\printfield{number}\newunit\newblock%
+	\printlist{location}\newunit\newblock%
+	\usebibmacro{author}\newunit\newblock%
+	\usebibmacro{date}\finentry
+}
+%]]]
+
+% Format: DOI full url [[[
+% ==================================
+% The regexp DOI is from here:
+% https://stackoverflow.com/questions/27910/finding-a-doi-in-a-document-or-page
+% SO much time wasted here...
+\DeclareStyleSourcemap{%
+\maps[datatype=bibtex]{%
+\map[overwrite]{%
+\step[%
+fieldsource=doi,%
+match=\regexp{(*nlb:https:\/\/doi.org\/)(10.\d{4,9}/[-._;()/:A-Za-z0-9]+)},%
+replace=\regexp{https://doi.org/$1}]%
+}%
+}%
+}%
+% ]]]
+
+% Format: fields [[[
+% =============
+\DeclareFieldFormat{author}{#1}
+\DeclareFieldFormat{title}{#1}
+\DeclareFieldFormat{chaptertitle}{#1}
+\DeclareFieldFormat{booktitle}{#1}
+\DeclareFieldFormat{volume}{Vol.\addnbthinspace{}#1}
+\DeclareFieldFormat{issue}{#1}
+\DeclareFieldFormat{number}{No.\addnbthinspace{}#1}
+\DeclareFieldFormat{month}{\mkbibmonth{#1}}
+\DeclareFieldFormat{urlmonth}{\mkbibmonth{#1}}
+\DeclareFieldFormat{edition}{
+	\ifinteger{#1}
+	{\mkbibordedition{#1}\addnbthinspace\bibstring{edition}}
+	{#1\addnbthinspace\bibstring{edition}}
+}
+\DeclareFieldFormat[inbook, incollection]{chapter}{ch.\addnbthinspace{}#1}
+\DeclareFieldFormat[inbook, incollection]{section}{sec.\addnbthinspace{}#1}
+\DeclareFieldFormat{pagetotal}{#1\addnbthinspace{}pp}
+\DeclareFieldFormat{pages}{pp.\addnbthinspace{}#1}
+% ]]]
+
+% Format: remove 1st, 2nd, etc... from bib file and
+% replace with ordinary number [[[
+\DeclareSourcemap{
+	\maps[datatype=bibtex]{
+		\map{
+			\step[fieldsource=edition,
+				match=\regexp{^(\d+)\.\s+(ed.|edition)$},
+				replace=\regexp{$1}]
+		}
+	}
+}
+% ]]]
+
+% Format: thesis's type [[[
+\DeclareStyleSourcemap{%
+	\maps[datatype=bibtex]{%
+		\map{%
+			\pertype{phdthesis}%
+			\step[fieldset={type}, fieldvalue={Ph.D.~dissertation}]%
+		}
+		\map{%
+			\pertype{mastersthesis}%
+			\step[fieldset={type}, fieldvalue={M.S.~thesis}]%
+		}
+		\map[overwrite]{%
+			\pertype{phdthesis}%
+			\step[fieldset={type}, fieldvalue={Ph.D.~dissertation}]%
+		}
+		\map[overwrite]{%
+			\pertype{mastersthesis}%
+			\step[fieldset={type}, fieldvalue={M.S.~thesis}]%
+		}
+	}
+}
+%]]]
+
+\endinput
+
+% vim: foldmethod=marker foldmarker=[[[,]]] foldlevel=0

@@ -1,0 +1,14 @@
+\begin{center}
+{\Large\bfseries Tóm tắt đề tài}
+\end{center}
+
+3D Gaussian Splatting (3DGS) cho phép tái tạo và hiển thị cảnh 3D với chất lượng trực quan cao, tốc độ thời gian thực và kích thước dữ liệu phù hợp cho các ứng dụng tương tác. Tuy nhiên, dữ liệu 3DGS chủ yếu mô tả trường bức xạ bằng tập Gaussian có vị trí, hướng, tỷ lệ, độ mờ và màu sắc; bản thân biểu diễn này không cung cấp bề mặt hình học kín, collision mesh hay navigation mesh. Trong bối cảnh Thực tế tăng cường (AR), khoảng trống này làm cho vật thể ảo khó nhận biết vật cản, khó bị che khuất đúng bởi môi trường thật và khó di chuyển theo địa hình có ý nghĩa hình học.
+
+Đề tài nghiên cứu và phát triển một công cụ xử lý tự động nhằm chuyển đổi dữ liệu 3DGS đầu vào ở định dạng \code{.ply} hoặc \code{.splat} thành bộ artifact phục vụ WebAR và desktop AR. Hệ thống bao gồm nhân xử lý Rust, CLI ở mức proof of concept và ứng dụng desktop Tauri/React là giao diện cuối cùng. Pipeline hiện tại đọc nguồn 3DGS, bake căn chỉnh tỷ lệ và trục lên, áp dụng các bộ lọc dữ liệu, voxel hóa bằng CPU hoặc GPU, trích xuất mesh, hỗ trợ adapter SuGaR/Poisson cho tái tạo bề mặt ngoài, sinh occlusion mesh, tùy chọn navigation mesh bằng rerecast, và đóng gói \artifact{scene.sog}, \artifact{occlusion.glb}, \artifact{manifest.json}, \artifact{webar.zip} cùng các artifact phụ trợ.
+
+Báo cáo trình bày cơ sở lý thuyết, yêu cầu chức năng, thiết kế hệ thống, phương pháp xử lý, triển khai ứng dụng desktop, cách đánh giá và các hạn chế còn tồn tại. Phần thực nghiệm không đưa số liệu benchmark chưa được chốt; thay vào đó mô tả bộ chỉ số, lệnh benchmark và phạm vi kiểm thử cần duy trì để bảo đảm báo cáo không đánh tráo giữa kết quả đã có và kết quả dự kiến.
+
+\vspace{0.4cm}
+\noindent\textbf{Từ khóa:} 3D Gaussian Splatting; AR; WebAR; voxelization; GPU; occlusion mesh; navigation mesh; SuGaR; Poisson Surface Reconstruction; Tauri; Rust.
+
+\newpage

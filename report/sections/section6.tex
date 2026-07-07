@@ -1,0 +1,86 @@
+\section{Triển khai ứng dụng desktop}
+
+\subsection{Vai trò của desktop app}
+
+Ứng dụng desktop trong \code{apps/desktop} là giao diện cuối cùng của đề tài. CLI vẫn quan trọng cho proof of concept, benchmark và automation, nhưng không phải trải nghiệm chính cho người dùng. Desktop app giải quyết vấn đề mà CLI khó làm tốt: preview trực quan, chọn điểm scale trên scene, chỉnh rotation/position, theo dõi progress, xem manifest và lưu bundle. Với dữ liệu 3DGS, việc nhìn trực tiếp scene trước khi bake là cần thiết vì sai up axis hoặc sai scale rất khó phát hiện chỉ qua JSON.
+
+Frontend được viết bằng React, build bằng Vite. Preview dùng PlayCanvas để hiển thị source. Backend desktop dùng Tauri command để gọi Rust core và thao tác file cục bộ. Kiến trúc này cho phép ứng dụng có UI web hiện đại nhưng vẫn truy cập filesystem và xử lý nặng bằng Rust.
+
+\subsection{Workflow giao diện}
+
+Workflow chính của GUI gồm các trạng thái: chọn nguồn, load, preview/edit, calibration, bake, export. Người dùng nhập Source PLY/SPLAT Path và Output Directory, bấm Load, sau đó canvas hiển thị preview. Khi source đã load, người dùng có thể double-click hoặc dùng picker để đặt \code{scale0} và \code{scale1}. Input Scale Calibration Distance mô tả khoảng cách thật giữa hai điểm. Up Axis được chọn từ danh sách trục. Nếu chọn reconstruction method là SuGaR hoặc Poisson, Adapter Command trở thành điều kiện bắt buộc.
+
+Nút Bake Geometry chỉ enabled khi đủ điều kiện. Các điều kiện gồm source sẵn sàng, scale endpoints do người dùng chọn, distance hợp lệ, adapter command hợp lệ nếu cần, và scene không bị ẩn/xóa. Khi bake chạy, progress stage được cập nhật theo event từ Tauri, ví dụ decode, alignment, filters, voxelize, fill, carve, mesh, navmesh, export và done. Nút Cancel vẫn còn để người dùng dừng job dài.
+
+\begin{table}[H]
+\centering
+\caption{Các nhóm điều khiển chính trong GUI.}
+\begin{tabularx}{\textwidth}{p{3.5cm}p{4cm}X}
+\toprule
+\textbf{Nhóm} & \textbf{Điều khiển} & \textbf{Mục đích}\\
+\midrule
+Nguồn dữ liệu & Source path, Output directory, Load & Nạp \code{.ply/.splat} và chuẩn bị thư mục bake.\\
+Editor & Position XYZ, Rotation XYZ & Chỉnh tư thế scene trước khi export nguồn tạm.\\
+Calibration & Scale distance, pick target, up axis & Tạo recipe scale và hướng trục.\\
+Processing & Reconstruction method, adapter command, bake profile & Chọn chiến lược tái tạo hình học.\\
+Job controls & Bake, Cancel, Save ZIP & Chạy, hủy và lưu bundle.\\
+Kết quả & Manifest, artifacts, warnings & Kiểm tra đầu ra và cảnh báo.\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Quản lý calibration state}
+
+Hook \code{useCalibration} giữ các state quan trọng: distance, scale points, up axis, geometry profile, reconstruction method, adapter command và pick mode. Một số state được lưu vào localStorage để giữ lại giữa các phiên. \code{makeAlignmentRecipe} sinh recipe từ distance, scale points và up axis. \code{makeProcessConfig} sinh cấu hình bake từ profile, reconstruction method và adapter command.
+
+Sau chỉnh sửa trong phiên làm báo cáo, \code{makeProcessConfig} mặc định dùng \code{voxel.backend = "gpu"} cho các profile GUI. Điều này khớp với định hướng GPU là đường chính. Rust core vẫn có enum \code{VoxelBackend::Cpu} và \code{VoxelBackend::Gpu}; config cũ hoặc CLI vẫn có thể chọn CPU khi cần. Unit test calibration và e2e test đã được cập nhật kỳ vọng backend GPU.
+
+Một chi tiết cần nói rõ là \code{geometryProfile} không làm thay đổi recipe alignment trong code hiện tại. Tham số này được truyền vào \code{makeAlignmentRecipe} nhưng recipe vẫn chỉ gồm up axis, floor normal, scale points, distance và origin. Profile chủ yếu ảnh hưởng process config: fill, carve và navmesh.
+
+\subsection{Editor transform}
+
+Editor transform nằm trong domain editor, gồm \code{SceneTransformControls}, \code{sceneTransform} và hook quản lý scene. Người dùng nhập position XYZ và rotation XYZ. Khi bake, \code{prepareBakeSource} gọi command export để tạo nguồn đã chỉnh. Tauri command validate transform hữu hạn, đọc source, apply transform và ghi file PLY tạm. Test Rust kiểm tra transform cập nhật vị trí và rotation của splat.
+
+Thiết kế này có ý nghĩa thực dụng. Thay vì yêu cầu người dùng xác định mặt sàn bằng nhiều điểm hoặc chỉnh trực tiếp file nguồn, GUI cung cấp transform toàn cục. Với các scene quét có orientation chưa đúng, rotation XYZ là cách nhanh để đưa scene về tư thế hợp lý. Với scene cần đặt vào hệ tọa độ AR, position XYZ giúp dịch về vị trí mong muốn trước khi pipeline xuất artifact.
+
+\subsection{Tauri command bridge}
+
+Tauri command bridge gồm các command chính:
+
+\begin{itemize}
+  \item \code{load\_source}: đọc metadata nguồn, trả path, bytes, format và số splat.
+  \item \code{export\_edited\_source}: apply scene transform và ghi nguồn tạm.
+  \item \code{process\_job}: gọi Rust core pipeline với input path, config và recipe.
+  \item \code{cancel\_job}: yêu cầu dừng job đang chạy.
+  \item \code{save\_bundle}: copy \artifact{webar.zip} sang vị trí người dùng chọn.
+  \item \code{open\_webar\_viewer}: mở viewer cho output khi cần.
+\end{itemize}
+
+Command \code{process\_job} trả manifest về GUI. Nếu source đã qua editor export, source context được ghi vào manifest để truy vết file gốc, file edited, số splat và bytes của nguồn đã chỉnh. Điều này giúp quá trình debug minh bạch hơn: khi artifact bị lệch, người phát triển biết pipeline đã xử lý file nào.
+
+\subsection{Preview và tương tác 3D}
+
+PlayCanvas preview giúp người dùng thấy dữ liệu trước khi bake. Với raw splat lớn, app có cơ chế dùng preview downsample để giữ UI responsive. E2E test kiểm tra rằng nguồn lớn có thể load metadata và preview path mà vẫn bảo toàn số lượng splat gốc. Canvas cũng hỗ trợ thao tác đặt marker cho scale endpoints. Overlay calibration hiển thị line scale, grid và hướng up axis để người dùng hiểu recipe hiện tại.
+
+Preview không thay thế kết quả bake. Nó là công cụ hỗ trợ tương tác. Artifact cuối vẫn do Rust core tạo. Tách preview khỏi core pipeline giúp giao diện mượt hơn và giảm nguy cơ logic render ảnh hưởng logic geometry.
+
+\subsection{Hiển thị kết quả}
+
+Sau khi bake xong, GUI hiển thị thông tin manifest. Người dùng có thể thấy số tam giác collision, đường dẫn artifact, warning và trạng thái save bundle. Các warning quan trọng gồm collision mesh 0 triangles, navmesh 0 triangles, seed carve bị resolve hoặc adapter output vượt target triangle. Hiển thị warning trực tiếp trong GUI giúp người vận hành không phải mở \artifact{manifest.json} thủ công để phát hiện lỗi.
+
+\begin{figure}[H]
+\centering
+\fbox{\begin{minipage}{0.92\textwidth}
+\centering
+\begin{tabular}{ccccc}
+\textbf{React UI} & $\leftrightarrow$ & \textbf{Tauri command} & $\leftrightarrow$ & \textbf{Rust core}\\
+Form state && JSON request && ProcessOutput\\
+PlayCanvas preview && file bridge && artifacts + manifest
+\end{tabular}
+\end{minipage}}
+\caption{Quan hệ giữa UI, Tauri command và Rust core trong desktop app.}
+\end{figure}
+
+\subsection{Ý nghĩa triển khai}
+
+Triển khai desktop chứng minh pipeline không chỉ là thuật toán backend. Để dùng được trong AR, công cụ cần cho người vận hành nhìn scene, chỉnh tư thế, nhập scale và nhận bundle. Đây là phần làm cho đề tài gần với ứng dụng thực tế hơn: các thao tác khó chuẩn hóa hoàn toàn bằng script được đưa vào GUI, còn các bước nặng và cần kiểm thử vẫn nằm trong core.

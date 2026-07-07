@@ -1,0 +1,13 @@
+\section{Kết luận}
+
+Đề tài đã nghiên cứu và triển khai một công cụ xử lý dữ liệu 3D Gaussian Splatting phục vụ hệ thống AR. Trọng tâm của đề tài là chuyển dữ liệu 3DGS từ biểu diễn mạnh về hiển thị sang bộ artifact có cấu trúc hình học: scene render, occlusion mesh, manifest, WebAR bundle và navigation mesh tùy chọn. Hệ thống không thay thế renderer 3DGS, mà bổ sung lớp geometry cần thiết để vật thể ảo có thể tương tác hợp lý hơn với môi trường thật.
+
+Về kiến trúc, hệ thống tách Rust core, CLI proof of concept và desktop GUI. Rust core đảm nhiệm các bước xử lý nặng và có kiểm thử độc lập. CLI hỗ trợ chạy batch và benchmark. Desktop app là giao diện cuối cùng, cho phép người dùng load \code{.ply/.splat}, preview scene, chỉnh position XYZ và rotation XYZ, đặt hai scale endpoints, chọn up axis, chọn reconstruction method và bake artifact. Thiết kế này cân bằng giữa khả năng tự động hóa và khả năng thao tác trực quan.
+
+Về phương pháp, pipeline hiện có alignment bake, filter, voxelization CPU/GPU, fill/carve, mesh extraction, reconstruction adapter SuGaR/Poisson, navmesh bằng rerecast và export WebAR. GPU voxelization được xem là đường chính trong GUI, trong khi CPU path vẫn giữ vai trò baseline và fallback cấu hình. SuGaR và Poisson được đặt trong kiến trúc adapter để hệ thống có thể mở rộng mà không buộc mọi dependency nghiên cứu vào core.
+
+Về sản phẩm, đầu ra chính gồm \artifact{manifest.json}, \artifact{scene.sog}, \artifact{occlusion.glb}, \artifact{webar.zip} và navmesh tùy chọn. Manifest đóng vai trò hợp đồng dữ liệu và nguồn metric cho đánh giá. GUI hiển thị trạng thái, artifact và warning, giúp người dùng phát hiện lỗi bake rõ ràng hơn so với chỉ chạy command line.
+
+Đề tài vẫn còn hạn chế ở calibration thủ công, chất lượng mesh phụ thuộc profile, adapter ngoài chưa được chuẩn hóa production và số liệu benchmark chưa chốt. Tuy nhiên, nền tảng hiện tại đã xác lập được pipeline, kiến trúc phần mềm và hợp đồng artifact cần thiết để tiếp tục phát triển. Các bước tiếp theo nên tập trung vào benchmark thực, overlay kiểm tra output trong GUI, GPU fallback, adapter plugin và nhận diện hình học tự động cho mặt sàn/vật cản.
+
+Tổng kết lại, công cụ đã tạo được cầu nối thực dụng giữa 3DGS và yêu cầu hình học của AR. Đây là hướng có giá trị nghiên cứu và ứng dụng vì nó giữ ưu điểm trực quan của 3DGS, đồng thời bổ sung dữ liệu mesh mà hệ thống AR cần để xử lý occlusion, collision và navigation.

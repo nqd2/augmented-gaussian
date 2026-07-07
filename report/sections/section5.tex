@@ -1,0 +1,112 @@
+\section{Phương pháp xử lý dữ liệu}
+
+\subsection{Chuẩn hóa bảng dữ liệu Splat}
+
+Sau khi đọc file nguồn, hệ thống đưa dữ liệu về bảng splat nội bộ. Bảng này lưu các thuộc tính cần thiết cho các bước sau: vị trí, scale, rotation, opacity và màu. Việc chuẩn hóa giúp filter, alignment, voxelization và export không cần biết dữ liệu đến từ \code{.ply} hay \code{.splat}. Đây là lựa chọn quan trọng vì mỗi định dạng có cách lưu property khác nhau, trong khi pipeline downstream cần một API thống nhất.
+
+Ở mức xử lý hình học, thuộc tính quan trọng nhất là vị trí và scale/rotation của Gaussian. Vị trí quyết định bounding box, scale calibration, voxel coverage và mesh extraction. Rotation và scale của Gaussian ảnh hưởng cách ước lượng đóng góp opacity lên voxel. Opacity giúp loại bỏ splat quá mờ và quyết định voxel nào được coi là solid. Màu chủ yếu phục vụ render/export \artifact{scene.sog}, nhưng không phải yếu tố chính khi tạo collision mesh.
+
+\subsection{Alignment bake}
+
+Alignment bake áp dụng scale, rotation và origin vào dữ liệu trước khi các bước filter và reconstruction chạy. Nếu recipe có hai scale points và khoảng cách vật lý, backend tính khoảng cách hiện tại trong scene, sau đó suy ra hệ số scale. Nếu có floor normal và up axis, backend tính rotation đưa normal về hướng up axis. Với GUI hiện tại, floor normal đã bằng vector của up axis nên rotation alignment thường là identity; phần xoay thực tế do người dùng chỉnh ở scene transform trước đó.
+
+Quy trình alignment có thể tóm tắt:
+
+\[
+s = \frac{d_{real}}{\|p_1 - p_0\|}
+\]
+
+Trong đó $p_0$ và $p_1$ là hai scale endpoints, $d_{real}$ là khoảng cách thật do người dùng nhập. Sau khi tính transform, hệ thống áp dụng lên vị trí, rotation và scale của từng splat. Việc bake vào dữ liệu đảm bảo artifact render và geometry cùng nằm trong một hệ tọa độ.
+
+\subsection{Scene transform trong desktop app}
+
+Scene transform là lớp chỉnh sửa trước alignment. Người dùng thao tác position XYZ và rotation XYZ trong editor. Khi bấm Bake, frontend gọi \code{export\_edited\_source}; Tauri đọc nguồn, áp dụng transform lên vị trí và quaternion rotation của splat, rồi ghi PLY tạm. Pipeline xử lý file tạm này như nguồn đầu vào. Cách này có hai ưu điểm: preview và output khớp nhau, và core không cần phụ thuộc trạng thái UI.
+
+Về mặt toán học, nếu $R_e$ là rotation từ Euler XYZ và $t_e$ là translation, mỗi điểm nguồn $x$ được biến đổi thành:
+
+\[
+x' = R_e x + t_e
+\]
+
+Rotation của Gaussian cũng được compose với $R_e$ để hướng ellipsoid không bị lệch so với vị trí mới. Đây là điểm quan trọng vì chỉ dịch/xoay tâm Gaussian mà không xoay covariance sẽ làm biểu diễn không nhất quán.
+
+\subsection{Lọc dữ liệu}
+
+Filtering loại bỏ dữ liệu lỗi hoặc không cần thiết trước khi reconstruction. Core hiện có các nhóm filter sau:
+
+\begin{itemize}
+  \item \code{filter\_nan}: loại splat có giá trị không hữu hạn.
+  \item \code{filter\_opacity\_min}: loại splat có opacity dưới ngưỡng.
+  \item \code{filter\_box}: giữ hoặc loại theo bounding box.
+  \item \code{filter\_sphere}: thao tác theo vùng cầu.
+  \item \code{filter\_cluster}: tìm cụm liên thông quanh seed trong voxel thô.
+  \item \code{filter\_floaters\_by\_voxel\_contribution}: loại splat có đóng góp voxel thấp.
+\end{itemize}
+
+Trong GUI profile mặc định, \code{editRecipe.operations} đang rỗng để tránh tự động cắt nhầm dữ liệu khi người dùng chưa cấu hình. Tuy nhiên, core vẫn giữ filter nâng cao để CLI hoặc workflow sau này sử dụng. Thiết kế này thận trọng: với dữ liệu 3DGS, một filter quá mạnh có thể loại mất bề mặt mỏng hoặc chi tiết quan trọng.
+
+\subsection{Voxelization CPU/GPU}
+
+Voxelization nhận bảng splat và sinh occupancy grid. Mỗi Gaussian đóng góp vào các voxel lân cận tùy theo vị trí, scale, rotation và opacity. Voxel được đánh dấu solid nếu giá trị tích lũy vượt \code{opacityThreshold}. Cấu hình chính gồm \code{voxel.size}, \code{opacityThreshold}, \code{backend} và \code{compareCpuGpu}.
+
+CPU backend là baseline dễ debug. GPU backend dùng \code{wgpu} để tăng throughput cho cảnh lớn. GUI hiện sinh \code{backend: "gpu"} làm mặc định. Trong core, nếu bật \code{compareCpuGpu}, hệ thống vẫn tính cả hai grid và ghi số mismatch vào manifest. Cách này cho phép kiểm chứng rằng GPU path không thay đổi ý nghĩa thuật toán so với CPU path.
+
+\begin{table}[H]
+\centering
+\caption{So sánh vai trò CPU và GPU path.}
+\begin{tabularx}{\textwidth}{p{3cm}p{5cm}X}
+\toprule
+\textbf{Path} & \textbf{Vai trò} & \textbf{Ghi chú}\\
+\midrule
+CPU & Baseline, kiểm thử, fallback cấu hình & Dễ debug, không phụ thuộc adapter GPU.\\
+GPU & Đường chính cho GUI bake & Phù hợp cảnh nhiều splat; metric ghi \code{gpuVoxelMs}.\\
+Compare & Kiểm chứng sai khác & Ghi \code{cpuGpuVoxelMismatches} khi bật.\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Fill và carve}
+
+Occupancy grid sau voxelization có thể chứa lỗ, vùng hở hoặc vùng solid không phù hợp với navigation. Fill và carve bổ sung logic hình học theo profile. \code{floor-fill} ưu tiên lấp theo mặt nền. \code{exterior-fill} hỗ trợ cảnh trong phòng, nơi cần phân biệt trong/ngoài khối chiếm dụng. \code{none} giữ nguyên grid khi profile không cần suy diễn thêm.
+
+Carve dùng capsule đại diện cho agent với \code{agentHeight} và \code{agentRadius}. Từ seed position, thuật toán xác định vùng agent có thể đi qua và loại các solid cell không phù hợp với không gian di chuyển. Nếu seed nằm sai hoặc bị chặn, manifest có thể ghi warning. Đây là lý do profile \code{interior-room} bật carve còn \code{object-prop} tắt: một vật thể nhỏ không cần vùng đi lại.
+
+\subsection{Mesh extraction}
+
+Sau fill/carve, hệ thống crop grid về vùng occupied để giảm kích thước xử lý rồi trích xuất mesh. Chế độ \code{faces} sinh mặt theo biên voxel, phù hợp collision proxy đơn giản. Chế độ \code{smooth} dùng Marching Cubes để tạo bề mặt mượt hơn. Sau khi sinh mesh, hệ thống validate, đếm số tam giác và ghi metric. Nếu mesh có 0 tam giác, manifest ghi warning để người dùng kiểm tra voxel size, opacity threshold, profile hoặc seed.
+
+Output mesh được ghi ở hai dạng. \artifact{collision\_mesh.json} giúp test và debug vì dễ đọc bằng code. \artifact{occlusion.glb} là artifact chuẩn để viewer hoặc engine khác sử dụng. Việc xuất GLB giúp giảm rào cản tích hợp với WebAR, game engine hoặc công cụ 3D phổ biến.
+
+\subsection{Adapter SuGaR/Poisson}
+
+Khi reconstruction method là \code{sugar} hoặc \code{poisson}, pipeline không chạy voxel mesh extraction làm kết quả chính. Thay vào đó, core ghi PLY đã lọc vào \code{adapter-work}, gửi request JSON cho adapter command và nhận mesh JSON trả về. Adapter có timeout để tránh treo bake vô hạn. Backend kiểm tra đường dẫn mesh nằm trong output directory sau khi canonicalize, nhằm giảm rủi ro adapter ghi file ngoài vùng dự kiến.
+
+Thiết kế adapter đặc biệt hữu ích cho nghiên cứu vì SuGaR và Poisson có yêu cầu môi trường khác nhau. SuGaR thường đi cùng pipeline tối ưu hóa riêng, còn Poisson cần point/normal phù hợp. Nếu ép tất cả vào một binary desktop, quá trình build, đóng gói và debug sẽ nặng. Adapter contract cho phép tiến hóa từng thuật toán độc lập nhưng vẫn giữ chung artifact cuối.
+
+\subsection{Navigation mesh bằng rerecast}
+
+Navmesh được bake từ collision mesh sau reconstruction. Core gọi rerecast với tham số agent và walkability. Nếu navmesh disabled, pipeline không xuất \artifact{navmesh.glb} hoặc \artifact{navmesh.bin}. Nếu enabled nhưng không sinh được tam giác, manifest ghi warning. Điều này rất quan trọng trong demo AR: navmesh rỗng không nên bị hiểu nhầm là không có lỗi, vì nguyên nhân có thể là up axis sai, seed carve bị chặn hoặc mesh không có mặt walkable.
+
+Navmesh không phải artifact bắt buộc cho mọi scene. Với object prop, navmesh thường không có ý nghĩa. Với interior room, navmesh giúp mô phỏng vùng đi lại hoặc đặt tác tử ảo. Với outdoor terrain, profile hiện tắt navmesh mặc định vì địa hình thực có thể cần chiến lược riêng để phân biệt bề mặt đi được, vật cản thấp và vùng không ổn định.
+
+\subsection{Export và đóng gói}
+
+Sau khi có scene data và mesh, pipeline export các file vào output directory. \artifact{scene.sog} lưu dữ liệu render đã alignment. \artifact{occlusion.glb} lưu mesh. \artifact{index.html} và PlayCanvas runtime được ghi để viewer có thể mở scene. \artifact{manifest.json} được ghi nhiều lần trong quá trình tạo \artifact{webar.zip} để đảm bảo size của zip trong manifest khớp với file thực tế.
+
+\begin{figure}[H]
+\centering
+\fbox{\begin{minipage}{0.94\textwidth}
+\centering
+\begin{tabularx}{0.9\textwidth}{p{3cm}X}
+\toprule
+Stage 1 & Decode source và chuẩn hóa splat table.\\
+Stage 2 & Bake scene transform, scale, up axis và origin.\\
+Stage 3 & Filter NaN/opacity/region/cluster/floater nếu recipe yêu cầu.\\
+Stage 4 & Voxel CPU/GPU hoặc external reconstruction adapter.\\
+Stage 5 & Fill, carve, mesh extraction và navmesh.\\
+Stage 6 & Export GLB, SOG, manifest, viewer và WebAR ZIP.\\
+\bottomrule
+\end{tabularx}
+\end{minipage}}
+\caption{Các stage xử lý chính trong pipeline.}
+\end{figure}

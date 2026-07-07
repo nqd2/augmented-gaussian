@@ -1,0 +1,95 @@
+\usepackage[a4paper,top=2.5cm,bottom=2.5cm,left=2.8cm,right=2.2cm]{geometry}
+\usepackage{fontspec}
+\setmainfont[
+  Path=Fonts/,
+  UprightFont=times.ttf,
+  BoldFont=timesbd.ttf,
+  ItalicFont=timesi.ttf,
+  BoldItalicFont=timesbi.ttf
+]{Times New Roman}
+\setsansfont[
+  Path=Fonts/,
+  UprightFont=arial.ttf,
+  BoldFont=arialbd.ttf,
+  ItalicFont=ariali.ttf,
+  BoldItalicFont=arialbi.ttf
+]{Arial}
+\setmonofont[
+  Path=Fonts/,
+  UprightFont=ARIALN.TTF,
+  BoldFont=ARIALNB.TTF,
+  ItalicFont=ARIALNI.TTF,
+  BoldItalicFont=ARIALNBI.TTF
+]{Arial Narrow}
+
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{enumitem}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{fancyhdr}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{setspace}
+\usepackage{titlesec}
+
+\definecolor{vhtred}{HTML}{C8102E}
+\definecolor{softgray}{HTML}{F5F6F8}
+\definecolor{midgray}{HTML}{646A73}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  citecolor=vhtred,
+  urlcolor=vhtred,
+  pdfauthor={Nguyen Quy Duc},
+  pdftitle={Bao cao nghien cuu 3D Gaussian Splatting phuc vu AR}
+}
+
+\setstretch{1.08}
+\setlength{\parindent}{1cm}
+\setlength{\parskip}{0.15em}
+\setlist{nosep,leftmargin=1.2cm}
+\setlength{\emergencystretch}{3em}
+\sloppy
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\small Công cụ xử lý 3D Gaussian Splatting phục vụ AR}
+\rhead{\small \thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+
+\titleformat{\section}{\normalfont\Large\bfseries\color{vhtred}}{\thesection.}{0.6em}{}
+\titleformat{\subsection}{\normalfont\large\bfseries}{\thesubsection.}{0.5em}{}
+\titleformat{\subsubsection}{\normalfont\normalsize\bfseries}{\thesubsubsection.}{0.5em}{}
+
+\captionsetup{font=small,labelfont=bf}
+\renewcommand{\figurename}{Hình}
+\renewcommand{\tablename}{Bảng}
+\renewcommand{\contentsname}{Mục lục}
+\renewcommand{\refname}{Tài liệu tham khảo}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  columns=fullflexible,
+  frame=single,
+  backgroundcolor=\color{softgray},
+  rulecolor=\color{midgray},
+  showstringspaces=false,
+  tabsize=2
+}
+
+\newcommand{\term}[1]{\textit{#1}}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\artifact}[1]{\texttt{#1}}
+\newcommand{\todoexp}{\textit{chưa chốt số liệu định lượng trong phạm vi báo cáo hiện tại}}
+
+\newenvironment{reportnote}
+{\begin{center}\begin{tabularx}{0.92\textwidth}{>{\bfseries}p{0.18\textwidth}X}\toprule}
+{\\\bottomrule\end{tabularx}\end{center}}
