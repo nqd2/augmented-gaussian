@@ -553,3 +553,65 @@ test('large ply metadata loads preview path and preserves original source count'
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+test('saved input path auto-loads cached preview on startup', async ({ page }) => {
+  test.setTimeout(180_000);
+  const repoRoot = path.resolve(process.cwd(), '../..');
+  buildApp();
+
+  await page.addInitScript(() => {
+    (window as any).__AG_CALLS__ = [];
+    (window as any).__AG_CONVERTED_PATHS__ = [];
+    (window as any).__TAURI_INTERNALS__ = {
+      invoke: async (cmd: string, args: any) => {
+        (window as any).__AG_CALLS__.push({ cmd, args });
+        if (cmd === 'plugin:event|listen') return 1;
+        if (cmd === 'plugin:event|unlisten') return true;
+        if (cmd === 'load_source') {
+          return {
+            path: 'tests/fixtures/original-large.ply',
+            previewPath: 'tests/fixtures/minimal.splat',
+            bytes: 1024,
+            format: 'ply',
+            splatCount: 250000,
+            previewSplatCount: 100000,
+          };
+        }
+        throw new Error(`unexpected command ${cmd}`);
+      },
+      transformCallback: () => 0,
+      unregisterCallback: () => {},
+      convertFileSrc: (filePath: string) => {
+        (window as any).__AG_CONVERTED_PATHS__.push(filePath);
+        return filePath;
+      },
+    };
+  });
+  await routeMinimalSplat(page, repoRoot);
+
+  const { server, url } = await serveDirectory(path.join(repoRoot, 'apps/desktop/dist'));
+  try {
+    await page.goto(`${url}/index.html`, { waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => {
+      localStorage.setItem('ag_input_path', JSON.stringify('tests/fixtures/original-large.ply'));
+    });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+
+    await expect(page.getByText('Preview Splats')).toBeVisible();
+    await expect(page.getByText('100,000')).toBeVisible();
+
+    expect(await page.evaluate(() => (window as any).__AG_CONVERTED_PATHS__)).toEqual([
+      'tests/fixtures/minimal.splat',
+    ]);
+    const loadCalls = await page.evaluate(() =>
+      (window as any).__AG_CALLS__.filter((call: any) => call.cmd === 'load_source')
+    );
+    expect(loadCalls).toEqual([
+      { cmd: 'load_source', args: { path: 'tests/fixtures/original-large.ply' } },
+    ]);
+    await expect(page.getByLabel('Source PLY/SPLAT Path')).toHaveValue('tests/fixtures/original-large.ply');
+  } finally {
+    await page.close().catch(() => {});
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});

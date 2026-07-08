@@ -5,7 +5,10 @@ use serde::Serialize;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 
+#[cfg(not(test))]
 const PREVIEW_SPLAT_LIMIT: usize = 5_000_000;
+#[cfg(test)]
+const PREVIEW_SPLAT_LIMIT: usize = 1_000;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,7 +36,11 @@ pub fn load_source(path: String) -> Result<SourceMetadata, String> {
         "ply" => {
             let metadata = read_ply_metadata(&absolute_path).map_err(|err| err.to_string())?;
             let preview = if metadata.vertex_count > PREVIEW_SPLAT_LIMIT {
-                Some(write_preview_ply(&absolute_path, file_metadata.len())?)
+                Some(load_or_write_preview_ply(
+                    &absolute_path,
+                    file_metadata.len(),
+                    metadata.vertex_count,
+                )?)
             } else {
                 None
             };
@@ -74,14 +81,68 @@ pub fn load_source(path: String) -> Result<SourceMetadata, String> {
     })
 }
 
-fn write_preview_ply(source_path: &PathBuf, source_bytes: u64) -> Result<(PathBuf, usize), String> {
-    let source = read_ply(source_path).map_err(|err| err.to_string())?;
-    let preview_count = source.len().min(PREVIEW_SPLAT_LIMIT);
-    let preview = downsample_table(&source, preview_count);
+fn load_or_write_preview_ply(
+    source_path: &PathBuf,
+    source_bytes: u64,
+    source_count: usize,
+) -> Result<(PathBuf, usize), String> {
+    let preview_count = source_count.min(PREVIEW_SPLAT_LIMIT);
     let preview_path =
-        preview_path_for_source(source_path, source_bytes, source.len(), preview_count);
-    write_ply(&preview_path, &preview).map_err(|err| err.to_string())?;
+        preview_path_for_source(source_path, source_bytes, source_count, preview_count);
+    if cached_preview_matches(&preview_path, preview_count) {
+        return Ok((preview_path, preview_count));
+    }
+
+    write_preview_ply(source_path, preview_path, preview_count)
+}
+
+fn cached_preview_matches(preview_path: &PathBuf, preview_count: usize) -> bool {
+    read_ply_metadata(preview_path)
+        .map(|metadata| metadata.vertex_count == preview_count)
+        .unwrap_or(false)
+}
+
+fn write_preview_ply(
+    source_path: &PathBuf,
+    preview_path: PathBuf,
+    preview_count: usize,
+) -> Result<(PathBuf, usize), String> {
+    let source = read_ply(source_path).map_err(|err| err.to_string())?;
+    let preview = downsample_table(&source, preview_count);
+    write_ply_atomically(&preview_path, &preview)?;
     Ok((preview_path, preview.len()))
+}
+
+fn write_ply_atomically(preview_path: &PathBuf, preview: &SplatTable) -> Result<(), String> {
+    let temp_path = temp_preview_path(preview_path);
+    write_ply(&temp_path, preview).map_err(|err| err.to_string())?;
+    match std::fs::rename(&temp_path, preview_path) {
+        Ok(()) => Ok(()),
+        Err(first_err) => {
+            let _ = std::fs::remove_file(preview_path);
+            std::fs::rename(&temp_path, preview_path).map_err(|second_err| {
+                let _ = std::fs::remove_file(&temp_path);
+                format!(
+                    "failed to install preview cache '{}': {}; retry after removing target failed: {}",
+                    preview_path.to_string_lossy(),
+                    first_err,
+                    second_err
+                )
+            })
+        }
+    }
+}
+
+fn temp_preview_path(preview_path: &PathBuf) -> PathBuf {
+    let file_name = preview_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("augmented-gaussian-preview.ply");
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    preview_path.with_file_name(format!("{file_name}.{}.{}.tmp", std::process::id(), unique))
 }
 
 fn preview_path_for_source(
@@ -162,8 +223,8 @@ mod tests {
     use augmented_gaussian_core::readers::read_ply;
     use std::io::Write;
 
-    fn minimal_ply_bytes(vertex_count: usize) -> Vec<u8> {
-        let mut bytes = format!(
+    fn minimal_ply_header(vertex_count: usize) -> Vec<u8> {
+        format!(
             concat!(
                 "ply\n",
                 "format binary_little_endian 1.0\n",
@@ -186,7 +247,11 @@ mod tests {
             ),
             vertex_count
         )
-        .into_bytes();
+        .into_bytes()
+    }
+
+    fn minimal_ply_bytes(vertex_count: usize) -> Vec<u8> {
+        let mut bytes = minimal_ply_header(vertex_count);
         for i in 0..vertex_count {
             for value in [
                 i as f32, 2.0, 3.0, 0.0, 0.1, 0.2, 1.0, 0.3, 0.4, 0.5, 1.0, 0.0, 0.0, 0.0,
@@ -228,7 +293,36 @@ mod tests {
         assert_eq!(metadata.preview_splat_count, Some(PREVIEW_SPLAT_LIMIT));
         assert_eq!(preview.len(), PREVIEW_SPLAT_LIMIT);
         assert_eq!(preview.x[0], 0.0);
-        assert_eq!(preview.x[50_000], 50_001.0);
+        let midpoint = PREVIEW_SPLAT_LIMIT / 2;
+        assert_eq!(preview.x[midpoint], (midpoint + 1) as f32);
+    }
+
+    #[test]
+    fn large_ply_load_source_reuses_existing_preview_file_without_decoding_source_rows() {
+        let source_count = PREVIEW_SPLAT_LIMIT + 2;
+        let preview_count = PREVIEW_SPLAT_LIMIT;
+        let mut input = tempfile::Builder::new().suffix(".ply").tempfile().unwrap();
+        input.write_all(&minimal_ply_header(source_count)).unwrap();
+        input.flush().unwrap();
+
+        let source_path = std::fs::canonicalize(input.path()).unwrap();
+        let source_bytes = std::fs::metadata(&source_path).unwrap().len();
+        let preview_path =
+            preview_path_for_source(&source_path, source_bytes, source_count, preview_count);
+        std::fs::write(&preview_path, minimal_ply_header(preview_count)).unwrap();
+
+        let metadata = load_source(source_path.to_string_lossy().to_string()).unwrap();
+        let expected_preview_path = preview_path.to_string_lossy().to_string();
+
+        assert_eq!(metadata.format, "ply");
+        assert_eq!(metadata.splat_count, source_count);
+        assert_eq!(metadata.preview_splat_count, Some(preview_count));
+        assert_eq!(
+            metadata.preview_path.as_deref(),
+            Some(expected_preview_path.as_str())
+        );
+
+        let _ = std::fs::remove_file(preview_path);
     }
 
     #[test]

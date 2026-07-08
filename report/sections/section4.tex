@@ -16,11 +16,11 @@ Thiết kế hệ thống được nhìn theo luồng dữ liệu logic thay vì
 \centering
 \fbox{\begin{minipage}{0.9\textwidth}
 \centering
-\begin{tabularx}{0.84\textwidth}{>{\bfseries}p{3.2cm}X}
+\begin{tabularx}{0.9\textwidth}{>{\bfseries\raggedright\arraybackslash}p{3.8cm}>{\raggedright\arraybackslash}X}
 \toprule
 Input & \code{.ply/.splat} được đọc và chuẩn hóa thành bảng splat nội bộ.\\
 Calibration Recipe & Scale endpoints, scale distance, up axis, origin và edit recipe.\\
-Processing Config & Reconstruction method, voxel backend, fill, carve, mesh, navmesh, export.\\
+Process Config & Reconstruction method, voxel backend, fill, carve, mesh, navmesh, export.\\
 Reconstruction & Voxel path trong Rust core hoặc adapter path cho SuGaR/Poisson.\\
 Export & Scene render, geometry proxy, manifest và WebAR bundle.\\
 \bottomrule

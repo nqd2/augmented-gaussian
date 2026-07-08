@@ -34,6 +34,7 @@ describe('splat preview parser', () => {
     view.setFloat32(12, 1, true);
     view.setFloat32(16, 0, true);
     view.setFloat32(20, 1, true);
+    bytes[27] = 128;
 
     expect(() => parseSplatColumns(bytes)).toThrow(/scale/);
   });

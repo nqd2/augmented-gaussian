@@ -8,7 +8,7 @@ Nếu chỉ dừng ở việc đọc file 3DGS và xuất một mesh, công cụ
 
 \subsection{Nhóm yêu cầu theo luận điểm nghiên cứu}
 
-\begin{longtable}{p{3.4cm}p{5.2cm}p{5.2cm}}
+\begin{longtable}{>{\raggedright\arraybackslash}p{2.8cm}>{\raggedright\arraybackslash}p{5.5cm}>{\raggedright\arraybackslash}p{5.5cm}}
 \caption{Các nhóm yêu cầu suy ra từ bài toán 3DGS phục vụ AR.}\\
 \toprule
 \textbf{Nhóm yêu cầu} & \textbf{Vấn đề cần giải quyết} & \textbf{Hàm ý đối với hệ thống}\\
@@ -18,12 +18,12 @@ Nếu chỉ dừng ở việc đọc file 3DGS và xuất một mesh, công cụ
 \textbf{Nhóm yêu cầu} & \textbf{Vấn đề cần giải quyết} & \textbf{Hàm ý đối với hệ thống}\\
 \midrule
 \endhead
-Geometry awareness & 3DGS thiếu surface/collision rõ ràng dù render tốt. & Phải sinh geometry proxy từ \code{.ply/.splat}, không chỉ giữ dữ liệu render.\\
-Occlusion readiness & AR cần vật thể thật che đúng vật thể ảo. & Phải xuất occlusion mesh ở định dạng phổ biến như GLB.\\
-Navigation readiness & Agent hoặc logic di chuyển cần vùng walkable. & Phải có khả năng bake navmesh với tham số agent và cảnh báo khi rỗng.\\
-Scale/coordinate consistency & Scene tái tạo có thể sai scale, sai up axis hoặc lệch transform. & Phải có recipe căn chỉnh scale/up axis và bake transform vào dữ liệu.\\
-WebAR deliverability & Runtime web cần artifact nhẹ, dễ mở và tự chứa. & Phải đóng gói \artifact{scene.sog}, mesh, viewer và metadata thành bundle.\\
-Performance and lightweight output & Cảnh 3DGS có thể có rất nhiều splat, mesh quá nặng sẽ khó dùng. & Phải có GPU path, metric thời gian, triangle count và tỷ lệ dung lượng.\\
+Geometry proxy & 3DGS thiếu surface/collision rõ ràng dù render tốt. & Phải sinh geometry proxy từ \code{.ply/.splat}, không chỉ giữ dữ liệu render.\\
+Occlusion & AR cần vật thể thật che đúng vật thể ảo. & Phải xuất occlusion mesh ở định dạng phổ biến như GLB.\\
+Navigation & Agent hoặc logic di chuyển cần vùng walkable. & Phải có khả năng bake navmesh với tham số agent và cảnh báo khi rỗng.\\
+Scale/coordinate & Scene tái tạo có thể sai scale, sai up axis hoặc lệch transform. & Phải có recipe căn chỉnh scale/up axis và bake transform vào dữ liệu.\\
+WebAR bundle & Runtime web cần artifact nhẹ, dễ mở và tự chứa. & Phải đóng gói \artifact{scene.sog}, mesh, viewer và metadata thành bundle.\\
+Performance & Cảnh 3DGS có thể có rất nhiều splat, mesh quá nặng sẽ khó dùng. & Phải có GPU path, metric thời gian, triangle count và tỷ lệ dung lượng.\\
 Reproducibility & Kết quả cần kiểm tra lại được, không phụ thuộc thao tác thủ công khó truy vết. & Phải lưu config, recipe, manifest, warning và metric.\\
 Extensibility & Không một thuật toán reconstruction phù hợp mọi cảnh. & Phải hỗ trợ voxel path và adapter path cho SuGaR/Poisson.\\
 \bottomrule

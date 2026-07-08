@@ -6,6 +6,7 @@ import { type ViewerLoadProgress, type ViewerSourceSummary } from '../classes/Pl
 import { useLocalStorage } from './useLocalStorage';
 
 const PREVIEW_SPLAT_LIMIT = 5_000_000;
+const INPUT_PATH_STORAGE_KEY = 'ag_input_path';
 
 function isRawSplatUrl(url: string) {
   return url.split(/[?#]/, 1)[0].toLowerCase().endsWith('.splat');
@@ -20,12 +21,14 @@ function sourcePathToUrl(path: string) {
 }
 
 export function useSourceLoader({ setStatus }: { setStatus: (s: string) => void }) {
-  const [inputPath, setInputPath] = useLocalStorage<string>('ag_input_path', '');
+  const [inputPath, setInputPath] = useLocalStorage<string>(INPUT_PATH_STORAGE_KEY, '');
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const [sourceMetadata, setSourceMetadata] = useState<SourceMetadata | null>(null);
   const [isSourceLoading, setIsSourceLoading] = useState(false);
   const [sourceLoadProgress, setSourceLoadProgress] = useState<ViewerLoadProgress | null>(null);
   const [previewMaxSplats, setPreviewMaxSplats] = useState<number | null>(null);
+  const shouldAutoLoadInitialSourceRef = useRef(hasStoredInputPath());
+  const didAutoLoadInitialSourceRef = useRef(false);
   const sourceLoadTokenRef = useRef(0);
   const isSourceLoadingRef = useRef(false);
 
@@ -121,13 +124,18 @@ export function useSourceLoader({ setStatus }: { setStatus: (s: string) => void 
     setStatus('source load cancelled');
   }, [setStatus]);
 
-  // Auto-reload point cloud on mount if inputPath has been saved
+  // Auto-reload the saved startup source once the restored input path is available.
   useEffect(() => {
-    if (inputPath) {
-      loadSource();
+    if (
+      didAutoLoadInitialSourceRef.current ||
+      !shouldAutoLoadInitialSourceRef.current ||
+      !inputPath
+    ) {
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    didAutoLoadInitialSourceRef.current = true;
+    loadSource();
+  }, [inputPath, loadSource]);
 
   return {
     inputPath,
@@ -145,6 +153,14 @@ export function useSourceLoader({ setStatus }: { setStatus: (s: string) => void 
     handleSourceReady,
     handleSourceError,
   };
+}
+
+function hasStoredInputPath() {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem(INPUT_PATH_STORAGE_KEY) !== null;
+  } catch {
+    return false;
+  }
 }
 
 function shouldUseRawPreview(metadata: SourceMetadata) {
